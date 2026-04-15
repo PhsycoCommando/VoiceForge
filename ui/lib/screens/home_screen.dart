@@ -1,0 +1,389 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
+import '../widgets/transcription_panel.dart';
+import '../widgets/mic_button.dart';
+import '../widgets/mode_selector.dart';
+import '../widgets/connection_indicator.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _api = ApiService();
+  final _ws = WebSocketService();
+
+  // State
+  bool _isRecording = false;
+  bool _isProcessing = false;
+  String _currentMode = 'clean';
+  List<String> _availableModes = [
+    'raw', 'clean', 'bullet', 'dev', 'ai_dev', 'ai_summary'
+  ];
+  WsConnectionState _connectionState = WsConnectionState.disconnected;
+
+  // Paragraph-based transcription
+  String _liveText = '';
+  final List<String> _paragraphs = []; // grouped by natural pauses
+  String _formattedOutput = '';         // right panel content
+
+  // Subscriptions
+  StreamSubscription? _eventSub;
+  StreamSubscription? _connSub;
+  final ScrollController _rawScroll = ScrollController();
+  final ScrollController _fmtScroll = ScrollController();
+  bool _shouldAutoScrollRaw = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _rawScroll.addListener(() {
+      if (_rawScroll.hasClients) {
+        _shouldAutoScrollRaw = _rawScroll.position.pixels >= _rawScroll.position.maxScrollExtent - 50;
+      }
+    });
+    _setupWebSocket();
+  }
+
+  void _setupWebSocket() {
+    _connSub = _ws.connectionState.listen((state) {
+      setState(() => _connectionState = state);
+      if (state == WsConnectionState.connected) _fetchStatus();
+    });
+
+    _eventSub = _ws.events.listen(_handleEvent);
+    _ws.connect();
+  }
+
+  Future<void> _fetchStatus() async {
+    try {
+      final status = await _api.getStatus();
+      setState(() {
+        _isRecording = status['pipeline_running'] as bool? ?? false;
+        _currentMode = status['current_mode'] as String? ?? 'clean';
+        final modes = status['available_modes'] as List?;
+        if (modes != null) _availableModes = modes.cast<String>().toList();
+      });
+    } catch (_) {}
+  }
+
+  void _handleEvent(TranscriptionEvent event) {
+    setState(() {
+      switch (event.type) {
+        case 'partial':
+          _liveText = event.raw;
+          break;
+
+        case 'final':
+          _liveText = '';
+          // Append to current paragraph (same thought)
+          if (_paragraphs.isEmpty) {
+            _paragraphs.add(event.raw);
+          } else {
+            final last = _paragraphs.last;
+            _paragraphs[_paragraphs.length - 1] =
+                last.isEmpty ? event.raw : '$last ${event.raw}';
+          }
+          if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+          break;
+
+        case 'paragraph_break':
+          // Long pause → new paragraph (new thought)
+          if (_paragraphs.isNotEmpty && _paragraphs.last.isNotEmpty) {
+            _paragraphs.add('');
+          }
+          break;
+
+        case 'status':
+          if (event.status == 'started') _isRecording = true;
+          if (event.status == 'stopped') _isRecording = false;
+          if (event.status == 'mode_changed') {
+            _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
+          }
+          if (_ws.availableModes.isNotEmpty) {
+            _availableModes = _ws.availableModes;
+          }
+          break;
+
+        case 'error':
+          _showSnackbar('⚠️ ${event.message}', isError: true);
+          break;
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions — buttons trigger transforms
+  // ---------------------------------------------------------------------------
+
+  /// Process with the selected mode → populate right panel.
+  Future<void> _processWithMode(String mode) async {
+    setState(() {
+      _currentMode = mode;
+    });
+    await _processFullSession();
+  }
+
+  /// Process Full Session: fetches from backend, then transforms.
+  Future<void> _processFullSession() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      // 1. Call GET /session
+      final sessionData = await _api.getSession();
+      final rawText = sessionData['text'] as String? ?? '';
+
+      if (rawText.trim().isEmpty) {
+        _showSnackbar('Nothing to process yet');
+        return;
+      }
+
+      await _api.setMode(_currentMode);
+
+      // 2. Transform using selected mode
+      if (_currentMode == 'raw') {
+        setState(() => _formattedOutput = rawText);
+      } else {
+        final result = await _api.transform(rawText, _currentMode);
+        setState(() {
+          _formattedOutput = result['formatted'] as String? ?? rawText;
+        });
+      }
+      _scrollToBottom(_fmtScroll);
+    } catch (e) {
+      _showSnackbar('Transform failed: $e', isError: true);
+    } finally {
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    try {
+      if (_isRecording) {
+        await _api.stopStream();
+      } else {
+        await _api.startStream();
+      }
+    } catch (e) {
+      _showSnackbar('Connection error: $e', isError: true);
+    }
+  }
+
+  void _clearTranscript() {
+    setState(() {
+      _paragraphs.clear();
+      _formattedOutput = '';
+      _liveText = '';
+    });
+    _api.clearSession().catchError((_) => <String, dynamic>{});
+  }
+
+  Future<void> _confirmClear() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Clear current session?', style: TextStyle(color: Colors.white)),
+        content: const Text('This will delete all raw and formatted transcription text.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm', style: TextStyle(color: Color(0xFFFF6B6B))),
+          ),
+        ],
+      ),
+    );
+    if (result == true) {
+      _clearTranscript();
+    }
+  }
+
+  void _scrollToBottom(ScrollController ctrl) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (ctrl.hasClients) {
+        ctrl.animateTo(
+          ctrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _showSnackbar(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? Colors.red.shade800 : null,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            _buildTopBar(),
+            const SizedBox(height: 20),
+            Expanded(child: _buildPanels()),
+            const SizedBox(height: 20),
+            _buildBottomBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  AppStatus get _appStatus {
+    if (_connectionState != WsConnectionState.connected) return AppStatus.disconnected;
+    if (_isProcessing) return AppStatus.processing;
+    if (_isRecording) return AppStatus.listening;
+    return AppStatus.ready;
+  }
+
+  Widget _buildTopBar() {
+    return Row(
+      children: [
+        const Icon(Icons.graphic_eq_rounded,
+            color: Color(0xFF6C5CE7), size: 28),
+        const SizedBox(width: 12),
+        const Text(
+          'VoiceForge',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(width: 16),
+        StatusIndicator(state: _appStatus),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: _confirmClear,
+          icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+          label: const Text('Clear'),
+          style: TextButton.styleFrom(foregroundColor: Colors.white54),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPanels() {
+    // LEFT: raw paragraphs (sacred)
+    final rawEntries = _paragraphs
+        .where((p) => p.trim().isNotEmpty)
+        .toList();
+
+    // RIGHT: formatted output (single block)
+    final fmtEntries = _formattedOutput.isNotEmpty
+        ? [_formattedOutput]
+        : <String>[];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // LEFT PANEL: Raw transcription — source of truth
+        Expanded(
+          child: TranscriptionPanel(
+            title: 'Raw Transcription',
+            icon: Icons.mic_rounded,
+            accentColor: const Color(0xFF00B894),
+            entries: rawEntries,
+            liveText: _liveText,
+            scrollController: _rawScroll,
+            isLive: _isRecording,
+          ),
+        ),
+        const SizedBox(width: 16),
+
+        // RIGHT PANEL: Formatted output — on-demand
+        Expanded(
+          child: TranscriptionPanel(
+            title: 'Formatted Output',
+            icon: Icons.auto_fix_high_rounded,
+            accentColor: const Color(0xFF6C5CE7),
+            entries: fmtEntries,
+            scrollController: _fmtScroll,
+            showMode: true,
+            mode: _currentMode,
+            showCopyButton: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          // Action buttons — each triggers a transform
+          ModeSelector(
+            currentMode: _currentMode,
+            availableModes: _availableModes,
+            onModeChanged: _processWithMode,
+            isProcessing: _isProcessing,
+          ),
+          const SizedBox(width: 16),
+          ElevatedButton.icon(
+             onPressed: _isProcessing ? null : _processFullSession,
+             icon: _isProcessing 
+                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                 : const Icon(Icons.bolt_rounded, size: 16),
+             label: Text(_isProcessing ? 'Processing...' : 'Process Full'),
+             style: ElevatedButton.styleFrom(
+               backgroundColor: const Color(0xFF6C5CE7),
+               foregroundColor: Colors.white,
+               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+               elevation: 0,
+             ),
+          ),
+          const Spacer(),
+
+          // Mic button
+          MicButton(
+            isRecording: _isRecording,
+            isConnected: _connectionState == WsConnectionState.connected,
+            onPressed: _toggleRecording,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();
+    _connSub?.cancel();
+    _ws.dispose();
+    _api.dispose();
+    _rawScroll.dispose();
+    _fmtScroll.dispose();
+    super.dispose();
+  }
+}

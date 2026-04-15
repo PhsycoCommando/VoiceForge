@@ -1,0 +1,19 @@
+# VoiceForge Python Dependencies
+# Install: pip install -r requirements.txt
+
+# --- Core ---
+fastapi>=0.100.0
+uvicorn>=0.20.0
+pydantic>=2.0.0
+
+# --- Audio ---
+sounddevice>=0.4.6
+scipy>=1.10.0
+numpy>=1.24.0
+
+# --- Transcription ---
+faster-whisper>=1.0.0
+
+# --- Utilities ---
+python-multipart>=0.0.6
+python-dotenv>=1.0.0

@@ -1,0 +1,42 @@
+# AI Agent Folders
+.tmp/
+.agents/
+.dev_notes/
+credentials.json
+token.json
+execution/
+directives/
+skills/
+.env
+GEMINI.md
+CLAUDE.md
+AGENTS.md
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Logs
+*.log
+
+# Flutter build artifacts
+ui/build/
+ui/.dart_tool/
+ui/.idea/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
