@@ -127,6 +127,21 @@ Text:
 """
 
 
+AI_PROMPT_PROMPT = """You are a prompt engineer. Transform the following spoken thoughts into a clear, well-structured AI prompt.
+
+Rules:
+- Preserve the user's original intent completely
+- Structure the output so it's ready to paste into an AI tool
+- Improve clarity and remove filler words
+- Do NOT hallucinate or add requirements that weren't mentioned
+- Do NOT include any preamble or explanation — output ONLY the prompt
+- Use clear sections if the input covers multiple aspects
+
+Text:
+"{input}"
+"""
+
+
 def _clean_response(result: str) -> str:
     """Strip <think>...</think> blocks from reasoning models."""
     return re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
@@ -206,6 +221,37 @@ def ai_format_summary(text: str) -> str:
     return fallback.format(text)
 
 
+def ai_format_prompt(text: str) -> str:
+    """
+    Convert spoken text into a structured AI prompt.
+
+    Uses the model configured for "prompt" mode (or default).
+    Falls back to 'clean' mode if AI is unavailable.
+
+    Args:
+        text: raw transcription
+
+    Returns:
+        str — structured prompt ready to paste into AI tools
+    """
+    model = cfg.get_model_for("prompt")
+
+    if _client.is_available():
+        print(f"🤖 Using model: {model} for prompt")
+        prompt = AI_PROMPT_PROMPT.format(input=text)
+        result = _client.generate(prompt, model=model)
+
+        if result:
+            result = _clean_response(result)
+            if result:
+                return result
+
+    # Fallback: just clean it up
+    from formatter import Formatter
+    fallback = Formatter(mode="clean")
+    return fallback.format(text)
+
+
 # ==============================================================================
 # REGISTER MODES
 # ==============================================================================
@@ -218,6 +264,8 @@ def register_ai_modes():
     Modes registered:
         - "ai_dev"     — AI-structured dev notes (Goals/Tasks/Notes)
         - "ai_summary" — AI-cleaned summary
+        - "summary"    — Alias for ai_summary (user-friendly name)
+        - "prompt"     — Convert speech into structured AI prompts
     """
     from formatter import Formatter
 
@@ -228,6 +276,14 @@ def register_ai_modes():
     @Formatter.register("ai_summary")
     def _ai_summary(text):
         return ai_format_summary(text)
+
+    @Formatter.register("summary")
+    def _summary(text):
+        return ai_format_summary(text)
+
+    @Formatter.register("prompt")
+    def _prompt(text):
+        return ai_format_prompt(text)
 
     # Log availability and model routing
     if _client.is_available():

@@ -18,13 +18,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final _api = ApiService();
   final _ws = WebSocketService();
 
+  // Modes shown in the UI (filtered from backend)
+  static const _visibleModes = ['raw', 'clean', 'bullet', 'summary', 'prompt'];
+
   // State
   bool _isRecording = false;
   bool _isProcessing = false;
   String _currentMode = 'clean';
-  List<String> _availableModes = [
-    'raw', 'clean', 'bullet', 'dev', 'ai_dev', 'ai_summary'
-  ];
+  List<String> _availableModes = _visibleModes;
   WsConnectionState _connectionState = WsConnectionState.disconnected;
 
   // Paragraph-based transcription
@@ -67,7 +68,13 @@ class _HomeScreenState extends State<HomeScreen> {
         _isRecording = status['pipeline_running'] as bool? ?? false;
         _currentMode = status['current_mode'] as String? ?? 'clean';
         final modes = status['available_modes'] as List?;
-        if (modes != null) _availableModes = modes.cast<String>().toList();
+        if (modes != null) {
+          // Filter to only show user-facing modes
+          _availableModes = modes
+              .cast<String>()
+              .where((m) => _visibleModes.contains(m))
+              .toList();
+        }
       });
     } catch (_) {}
   }
@@ -106,7 +113,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
           }
           if (_ws.availableModes.isNotEmpty) {
-            _availableModes = _ws.availableModes;
+            _availableModes = _ws.availableModes
+                .where((m) => _visibleModes.contains(m))
+                .toList();
           }
           break;
 
@@ -157,6 +166,35 @@ class _HomeScreenState extends State<HomeScreen> {
       _scrollToBottom(_fmtScroll);
     } catch (e) {
       _showSnackbar('Transform failed: $e', isError: true);
+    } finally {
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  /// Reprocess: re-runs current formatted output through the selected mode.
+  Future<void> _reprocessOutput() async {
+    if (_formattedOutput.trim().isEmpty) {
+      _showSnackbar('Nothing to reprocess');
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+
+    try {
+      await _api.setMode(_currentMode);
+
+      if (_currentMode == 'raw') {
+        // Raw mode on formatted output is a no-op
+        return;
+      }
+
+      final result = await _api.transform(_formattedOutput, _currentMode);
+      setState(() {
+        _formattedOutput = result['formatted'] as String? ?? _formattedOutput;
+      });
+      _scrollToBottom(_fmtScroll);
+    } catch (e) {
+      _showSnackbar('Reprocess failed: $e', isError: true);
     } finally {
       setState(() => _isProcessing = false);
     }
@@ -237,17 +275,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            _buildTopBar(),
-            const SizedBox(height: 20),
-            Expanded(child: _buildPanels()),
-            const SizedBox(height: 20),
-            _buildBottomBar(),
-          ],
-        ),
+      body: Stack(
+        children: [
+          // Main content
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                _buildTopBar(),
+                const SizedBox(height: 20),
+                Expanded(child: _buildPanels()),
+                const SizedBox(height: 20),
+                _buildBottomBar(),
+              ],
+            ),
+          ),
+
+          // Floating mic button — always accessible, bottom-center
+          Positioned(
+            bottom: 18,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: MicButton(
+                isRecording: _isRecording,
+                isConnected: _connectionState == WsConnectionState.connected,
+                onPressed: _toggleRecording,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -310,6 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
             liveText: _liveText,
             scrollController: _rawScroll,
             isLive: _isRecording,
+            showCopyButton: true,
           ),
         ),
         const SizedBox(width: 16),
@@ -341,36 +399,49 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          // Action buttons — each triggers a transform
-          ModeSelector(
-            currentMode: _currentMode,
-            availableModes: _availableModes,
-            onModeChanged: _processWithMode,
-            isProcessing: _isProcessing,
+          // Mode chips
+          Flexible(
+            child: ModeSelector(
+              currentMode: _currentMode,
+              availableModes: _availableModes,
+              onModeChanged: _processWithMode,
+              isProcessing: _isProcessing,
+            ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
+
+          // Process button
           ElevatedButton.icon(
              onPressed: _isProcessing ? null : _processFullSession,
              icon: _isProcessing 
                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                  : const Icon(Icons.bolt_rounded, size: 16),
-             label: Text(_isProcessing ? 'Processing...' : 'Process Full'),
+             label: Text(_isProcessing ? 'Processing...' : 'Process'),
              style: ElevatedButton.styleFrom(
                backgroundColor: const Color(0xFF6C5CE7),
                foregroundColor: Colors.white,
-               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                elevation: 0,
              ),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
 
-          // Mic button
-          MicButton(
-            isRecording: _isRecording,
-            isConnected: _connectionState == WsConnectionState.connected,
-            onPressed: _toggleRecording,
+          // Reprocess button
+          OutlinedButton.icon(
+             onPressed: (_isProcessing || _formattedOutput.isEmpty) ? null : _reprocessOutput,
+             icon: const Icon(Icons.refresh_rounded, size: 16),
+             label: const Text('Reprocess'),
+             style: OutlinedButton.styleFrom(
+               foregroundColor: const Color(0xFFA29BFE),
+               side: BorderSide(color: const Color(0xFFA29BFE).withValues(alpha: 0.4)),
+               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+             ),
           ),
+
+          // Spacer to push content left, mic floats above via Stack
+          const Spacer(),
         ],
       ),
     );
