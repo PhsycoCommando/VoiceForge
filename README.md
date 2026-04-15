@@ -1,37 +1,38 @@
----
+# 🚀 VoiceForge
 
-# VoiceForge
+**Local AI Voice Transcription + Prompt Engine**
 
-**Local AI Voice Transcription System**
-
-VoiceForge is a real-time voice-to-text system designed for developers, creators, and thinkers who want to capture ideas instantly and structure them later using local AI models.
-
----
+VoiceForge is a real-time voice-to-text system designed for developers, creators, and thinkers who want to capture ideas instantly — and structure them later using local AI.
 
 ## 🧠 Core Concept
 
 > Speak freely → Capture raw → Transform later
 
-VoiceForge preserves your original speech as the **source of truth**, then allows optional AI-powered formatting using local models via Ollama.
-
----
+VoiceForge treats your raw input as the source of truth, then lets you refine it into structured outputs using local models via Ollama.
 
 ## ✨ Features
 
-* 🎤 Real-time voice transcription
-* 📝 Raw + formatted dual-panel UI
-* ⚡ Push-to-talk recording system
-* 🧠 Local AI formatting (Ollama)
-* 🔀 Multi-model routing support
+* 🎤 Real-time voice transcription (push-to-talk)
+* 📝 Editable RAW input (type, paste, or speak)
+* ⚡ Dual-panel UI (Raw → Processed)
+* 🧠 Local AI transformations (Ollama)
+* 🔄 Reprocess pipeline (iterate instantly)
 * 📄 Paragraph-aware transcription
-* 🔄 Post-processing on demand
+* 📋 Copy-ready outputs
 
----
+## 🧩 Output Modes
+
+Transform your input into:
+
+* **Clean** → Proper sentences & paragraphs
+* **Bullet** → Structured key points
+* **Summary** → Condensed overview
+* **Prompt** → AI-ready structured prompt
 
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/PhsycoCommando/VoiceForge
+git clone https://github.com/PhsycoCommando/VoiceForge.git
 cd VoiceForge
 chmod +x scripts/install.sh
 ./scripts/install.sh
@@ -43,19 +44,14 @@ Launch from system search:
 VoiceForge
 ```
 
----
-
 ## 🧰 Requirements
 
-* Linux (Ubuntu / Pop!_OS recommended)
+* Linux (Ubuntu / Pop!_OS tested)
 * Python 3.10+
 * Ollama installed
 
-Install Ollama:
-
+👉 Install Ollama:
 https://ollama.com
-
----
 
 ## 🤖 Recommended Models
 
@@ -64,8 +60,6 @@ https://ollama.com
 | Fast / Light    | gemma3:4b   |
 | Balanced        | qwen:7b     |
 | Dev Structuring | deepseek-r1 |
-
----
 
 ## 🖥 Usage
 
@@ -77,8 +71,6 @@ Run manually:
 
 Or launch via system app menu.
 
----
-
 ## 📁 Project Structure
 
 ```
@@ -88,22 +80,20 @@ scripts/     install + run automation
 assets/      icons and static resources
 ```
 
----
-
 ## 🧪 Status
 
-Early release — actively being improved
+v0.1.0 — First usable release
+Actively being improved
 
----
+## 💰 Support
 
-## ❤️ Support
+If you find this useful and want to support development:
 
-Ko-fi and Discord coming soon.
+☕ [https://ko-fi.com/phsyco](https://ko-fi.com/phsyco)
 
----
+More support options coming soon.
 
 ## 📜 License
 
-MIT (to be added)
-
----
+This project is licensed under the MIT License.
+See the [LICENSE](LICENSE) file for details.
