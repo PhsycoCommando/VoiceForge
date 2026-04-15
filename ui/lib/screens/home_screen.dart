@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Paragraph-based transcription
   String _liveText = '';
-  final List<String> _paragraphs = []; // grouped by natural pauses
+  final TextEditingController _rawController = TextEditingController();
   String _formattedOutput = '';         // right panel content
 
   // Subscriptions
@@ -88,21 +88,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
         case 'final':
           _liveText = '';
-          // Append to current paragraph (same thought)
-          if (_paragraphs.isEmpty) {
-            _paragraphs.add(event.raw);
+          // Append to controller text (preserves user edits)
+          final existing = _rawController.text;
+          if (existing.isEmpty) {
+            _rawController.text = event.raw;
           } else {
-            final last = _paragraphs.last;
-            _paragraphs[_paragraphs.length - 1] =
-                last.isEmpty ? event.raw : '$last ${event.raw}';
+            _rawController.text = '$existing ${event.raw}';
           }
+          // Move cursor to end
+          _rawController.selection = TextSelection.collapsed(
+            offset: _rawController.text.length,
+          );
           if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
           break;
 
         case 'paragraph_break':
-          // Long pause → new paragraph (new thought)
-          if (_paragraphs.isNotEmpty && _paragraphs.last.isNotEmpty) {
-            _paragraphs.add('');
+          // Long pause → new paragraph (double newline)
+          final text = _rawController.text;
+          if (text.isNotEmpty && !text.endsWith('\n\n')) {
+            _rawController.text = '$text\n\n';
+            _rawController.selection = TextSelection.collapsed(
+              offset: _rawController.text.length,
+            );
           }
           break;
 
@@ -138,23 +145,21 @@ class _HomeScreenState extends State<HomeScreen> {
     await _processFullSession();
   }
 
-  /// Process Full Session: fetches from backend, then transforms.
+  /// Process Full Session: uses current raw text from controller.
   Future<void> _processFullSession() async {
+    final rawText = _rawController.text.trim();
+
+    if (rawText.isEmpty) {
+      _showSnackbar('Nothing to process yet');
+      return;
+    }
+
     setState(() => _isProcessing = true);
 
     try {
-      // 1. Call GET /session
-      final sessionData = await _api.getSession();
-      final rawText = sessionData['text'] as String? ?? '';
-
-      if (rawText.trim().isEmpty) {
-        _showSnackbar('Nothing to process yet');
-        return;
-      }
-
       await _api.setMode(_currentMode);
 
-      // 2. Transform using selected mode
+      // Transform using selected mode
       if (_currentMode == 'raw') {
         setState(() => _formattedOutput = rawText);
       } else {
@@ -214,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _clearTranscript() {
     setState(() {
-      _paragraphs.clear();
+      _rawController.clear();
       _formattedOutput = '';
       _liveText = '';
     });
@@ -293,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Floating mic button — always accessible, bottom-center
           Positioned(
-            bottom: 18,
+            bottom: 52,
             left: 0,
             right: 0,
             child: Center(
@@ -344,11 +349,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildPanels() {
-    // LEFT: raw paragraphs (sacred)
-    final rawEntries = _paragraphs
-        .where((p) => p.trim().isNotEmpty)
-        .toList();
-
     // RIGHT: formatted output (single block)
     final fmtEntries = _formattedOutput.isNotEmpty
         ? [_formattedOutput]
@@ -357,13 +357,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // LEFT PANEL: Raw transcription — source of truth
+        // LEFT PANEL: Raw transcription — editable source of truth
         Expanded(
           child: TranscriptionPanel(
             title: 'Raw Transcription',
             icon: Icons.mic_rounded,
             accentColor: const Color(0xFF00B894),
-            entries: rawEntries,
+            entries: const [],
+            textController: _rawController,
             liveText: _liveText,
             scrollController: _rawScroll,
             isLive: _isRecording,
@@ -453,6 +454,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _connSub?.cancel();
     _ws.dispose();
     _api.dispose();
+    _rawController.dispose();
     _rawScroll.dispose();
     _fmtScroll.dispose();
     super.dispose();

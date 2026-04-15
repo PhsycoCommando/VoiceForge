@@ -11,6 +11,7 @@ class TranscriptionPanel extends StatelessWidget {
   final List<String> entries;
   final String? liveText;
   final ScrollController? scrollController;
+  final TextEditingController? textController;
   final bool isLive;
   final bool showMode;
   final String? mode;
@@ -24,6 +25,7 @@ class TranscriptionPanel extends StatelessWidget {
     required this.entries,
     this.liveText,
     this.scrollController,
+    this.textController,
     this.isLive = false,
     this.showMode = false,
     this.mode,
@@ -87,8 +89,8 @@ class TranscriptionPanel extends StatelessWidget {
             ),
           ],
           const Spacer(),
-          if (showCopyButton && entries.isNotEmpty)
-            _CopyButton(textToCopy: entries.join('\n\n')),
+          if (showCopyButton && (entries.isNotEmpty || (textController != null && textController!.text.isNotEmpty)))
+            _CopyButton(textToCopy: textController != null ? textController!.text : entries.join('\n\n')),
           if (isLive)
             _PulsingDot(color: accentColor),
         ],
@@ -97,8 +99,52 @@ class TranscriptionPanel extends StatelessWidget {
   }
 
   Widget _buildContent() {
-    final hasContent = entries.isNotEmpty || (liveText?.isNotEmpty ?? false);
+    final hasEntries = entries.isNotEmpty || (liveText?.isNotEmpty ?? false);
+    final hasControllerText = textController != null && textController!.text.isNotEmpty;
+    final hasContent = hasEntries || hasControllerText;
 
+    // Editable mode: show a TextField when a controller is provided
+    if (textController != null) {
+      return Column(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                controller: textController,
+                scrollController: scrollController,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                style: const TextStyle(
+                  fontSize: 14,
+                  height: 1.6,
+                  color: Colors.white70,
+                ),
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  hintText: 'Start speaking or paste text here...',
+                  hintStyle: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    fontSize: 14,
+                  ),
+                  isCollapsed: true,
+                ),
+                cursorColor: accentColor,
+              ),
+            ),
+          ),
+          // Live text indicator at the bottom
+          if (liveText?.isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: _LiveEntry(text: liveText!, color: accentColor),
+            ),
+        ],
+      );
+    }
+
+    // Display-only mode (original behavior)
     if (!hasContent) {
       return Center(
         child: Column(
