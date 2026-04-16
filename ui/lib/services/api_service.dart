@@ -90,6 +90,33 @@ class ApiService {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  // ---------------------------------------------------------------------------
+  // Device selection
+  // ---------------------------------------------------------------------------
+
+  /// Get all available microphones.
+  Future<List<Map<String, dynamic>>> getMicrophones() async {
+    final resp = await _client.get(Uri.parse('$baseUrl/devices/microphones'));
+    final list = jsonDecode(resp.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  /// Select a microphone by its index.
+  Future<Map<String, dynamic>> selectMicrophone(int deviceId) async {
+    final resp = await _client.post(
+      Uri.parse('$baseUrl/devices/microphone'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'device_id': deviceId}),
+    );
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Get the currently selected microphone.
+  Future<Map<String, dynamic>> getCurrentMicrophone() async {
+    final resp = await _client.get(Uri.parse('$baseUrl/devices/microphone'));
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   void dispose() {
     _client.close();
   }

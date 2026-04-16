@@ -17,6 +17,51 @@ Run:
     # or: uvicorn server:app --host 0.0.0.0 --port 8000
 """
 
+# --- PyInstaller compatibility fixes ---
+# Must run BEFORE any imports that pull in torch/faster_whisper/ctranslate2.
+import sys as _sys, os as _os
+
+if getattr(_sys, 'frozen', False):
+    # 1. Redirect stdout/stderr — noconsole mode uses cp1252 which chokes on emoji
+    _sys.stdout = open(_os.devnull, 'w', encoding='utf-8')
+    _sys.stderr = open(_os.devnull, 'w', encoding='utf-8')
+
+    # 2. Disable torch compile/JIT/dynamic features that inspect source files
+    _os.environ["PYTORCH_JIT"] = "0"
+    _os.environ["TORCH_JIT"] = "0"
+    _os.environ["TORCH_DISABLE_DYNAMIC_MODULE"] = "1"
+
+    # 3. Monkey-patch ALL inspect source functions — torch._config_module calls
+    #    findsource → getsourcelines → getsource chain. Must patch findsource
+    #    since that's where the actual OSError originates.
+    import inspect as _inspect
+
+    _orig_findsource = _inspect.findsource
+    _orig_getsourcelines = _inspect.getsourcelines
+    _orig_getsource = _inspect.getsource
+
+    def _safe_findsource(obj):
+        try:
+            return _orig_findsource(obj)
+        except OSError:
+            return ([""], 0)
+
+    def _safe_getsourcelines(obj):
+        try:
+            return _orig_getsourcelines(obj)
+        except OSError:
+            return ([""], 0)
+
+    def _safe_getsource(obj):
+        try:
+            return _orig_getsource(obj)
+        except OSError:
+            return ""
+
+    _inspect.findsource = _safe_findsource
+    _inspect.getsourcelines = _safe_getsourcelines
+    _inspect.getsource = _safe_getsource
+
 import asyncio
 import io
 import json
@@ -260,6 +305,17 @@ class PipelineManager:
                 "message": str(e),
             })
         finally:
+            # Close generators to set _is_recording = False in audio_capture.
+            # The underlying InputStream stays alive (persistent stream).
+            try:
+                events.close()
+            except Exception:
+                pass
+            try:
+                chunks.close()
+            except Exception:
+                pass
+
             with self._lock:
                 self._running = False
             event_bus.publish({
@@ -413,6 +469,42 @@ async def stop_stream():
 
     pipeline.stop()
     return {"status": "stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Device selection
+# ---------------------------------------------------------------------------
+
+class MicSelectRequest(BaseModel):
+    device_id: int
+
+
+@app.get("/devices/microphones")
+async def list_microphones():
+    """Return all available WASAPI microphones."""
+    from audio_capture import list_microphones as _list_mics
+    return _list_mics()
+
+
+@app.post("/devices/microphone")
+async def select_microphone(req: MicSelectRequest):
+    """Select a microphone by index. Takes effect on next recording start."""
+    from audio_capture import set_microphone
+    try:
+        result = set_microphone(req.device_id)
+        return {"status": "ok", **result}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/devices/microphone")
+async def get_current_microphone():
+    """Return the currently selected microphone, or null."""
+    from audio_capture import get_selected_microphone_info
+    info = get_selected_microphone_info()
+    if info is None:
+        return {"name": None, "status": "auto"}
+    return {"status": "manual", **info}
 
 
 @app.post("/transform")
@@ -627,11 +719,59 @@ async def websocket_stream(websocket: WebSocket):
 
 
 # ==============================================================================
-# RUN
+# RUN (HARDENED STARTUP)
 # ==============================================================================
 
 if __name__ == "__main__":
     import uvicorn
+    import argparse
+    import socket
+    import sys
+
+    try:
+        import requests
+    except ImportError:
+        print("⚠️ 'requests' not installed. Install with: pip install requests")
+        sys.exit(1)
+
+    def is_backend_running(port):
+        try:
+            r = requests.get(f"http://localhost:{port}", timeout=0.5)
+            return r.status_code == 200
+        except:
+            return False
+
+    def find_available_port(start_port=8000, max_tries=4):
+        for i in range(max_tries):
+            port = start_port + i
+
+            # If backend already running → exit clean
+            if is_backend_running(port):
+                print(f"⚠️ Backend already running on port {port}, skipping startup")
+                return None
+
+            # Check if port is free
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("0.0.0.0", port))
+                    return port
+                except OSError:
+                    print(f"⚠️ Port {port} in use, trying next...")
+                    continue
+
+        raise RuntimeError("❌ No available ports (8000–8003)")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    selected_port = find_available_port(args.port)
+
+    if selected_port is None:
+        print("🛑 Startup skipped (already running)")
+        sys.exit(0)
 
     print("\n" + cfg.summary() + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print(f"🚀 Starting VoiceForge backend on port {selected_port}")
+
+    uvicorn.run(app, host="0.0.0.0", port=selected_port)

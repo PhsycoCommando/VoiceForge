@@ -27,6 +27,7 @@ To customize without editing this file:
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field, fields
 
 
@@ -40,7 +41,7 @@ class VoiceForgeConfig:
     compute_type: str = "int8"          # int8, float16, float32
 
     # --- Microphone ---
-    mic_device: int = 4                 # audio input device index (fallback: 10 / 11)
+    mic_device: int = -1                 # audio input device index (-1 = auto-detect)
     target_sample_rate: int = 16000     # Whisper expects 16kHz
 
     # --- Speech detection ---
@@ -111,7 +112,7 @@ _CONFIG_FILENAME = "voice_forge.json"
 def _find_config_file():
     """Look for voice_forge.json next to main.py or in cwd."""
     # Check directory of this config.py file
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(here, _CONFIG_FILENAME)
     if os.path.isfile(path):
         return path

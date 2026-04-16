@@ -40,3 +40,20 @@ ui/.idea/
 # OS
 .DS_Store
 Thumbs.db
+
+# Windows builds
+*.exe
+*.dll
+data/
+backend/_internal/
+
+# PyInstaller
+dist/
+build/
+
+# Flutter build junk
+ui/build/
+
+# Misc
+*.log
+backend/
