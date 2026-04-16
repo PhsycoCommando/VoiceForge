@@ -147,13 +147,12 @@ cat > "$DESKTOP_DIR/voiceforge.desktop" <<EOF
 [Desktop Entry]
 Name=VoiceForge
 Comment=Local AI Voice Transcription System
-Exec=$RUN_SCRIPT
-Icon=voiceforge
+Exec=bash -c "cd $PROJECT_DIR && ./scripts/run.sh"
+Icon=$PROJECT_DIR/assets/voiceforge.png
 Terminal=false
 Type=Application
 Categories=Utility;
-StartupWMClass=voiceforge
-StartupNotify=true
+StartupNotify=false
 EOF
 
 info "Desktop entry installed"
