@@ -1,5 +1,7 @@
 # 🚀 VoiceForge
 
+🚀 **Latest Release: [v0.1.1](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v0.1.1)**
+
 **Local AI Voice Transcription + Prompt Engine**
 
 VoiceForge is a real-time voice-to-text system designed for developers, creators, and thinkers who want to capture ideas instantly — and structure them later using local AI.
