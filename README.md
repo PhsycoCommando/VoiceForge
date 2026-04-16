@@ -6,6 +6,53 @@
 
 VoiceForge is a real-time voice-to-text system designed for developers, creators, and thinkers who want to capture ideas instantly — and structure them later using local AI.
 
+---
+
+## 🪟 Windows (One-Click Version) 🔥 NEW
+
+> Built 4/16/2026 — ~20 hours over 2 days
+
+No setup. No Python. No dependencies.  
+Just **download → extract → run.**
+
+---
+
+### 🔽 Download
+
+👉 Go to **Releases** and download:
+
+`VoiceForge_Windows_v1.zip`
+
+---
+
+### ▶️ Run
+
+1. Extract the ZIP anywhere
+2. Double-click:
+
+`VoiceForge.exe`
+
+3. Done. 🎤
+
+---
+
+### ⚙️ What Happens Automatically
+
+- Backend server auto-launches
+- Microphone initializes (WASAPI)
+- UI connects instantly
+- Ready for recording
+
+---
+
+### ⚠️ Notes
+
+- First launch may take a few seconds (backend spin-up)
+- Ensure your microphone works in Windows
+- Voicemeeter users: select the correct device in the dropdown (top bar)
+
+---
+
 ## 🧠 Core Concept
 
 > Speak freely → Capture raw → Transform later
@@ -32,6 +79,53 @@ Transform your input into:
 * **Prompt** → AI-ready structured prompt
 
 ## 🚀 Quick Start
+
+## 🪟 Windows (One-Click Version)
+
+No setup. No Python. No dependencies.
+
+### 🔽 Download
+
+👉 Download the latest Windows build from Releases:  
+https://github.com/PhsycoCommando/VoiceForge/releases
+
+---
+
+### ▶️ Run
+
+1. Extract the ZIP
+2. Double-click `VoiceForge.exe`
+3. Done
+
+---
+
+### ⚡ What Just Works
+
+- 🎤 Real-time transcription
+- 🧠 Local AI formatting (Ollama)
+- 🎛️ Microphone selection (built-in)
+- ⚙️ Backend auto-launch (no manual setup)
+
+---
+
+### ⚠️ Notes
+
+- First launch may take a few seconds (backend initializes)
+- Make sure your microphone is available in Windows
+- Works with virtual audio (Voicemod, Voicemeeter, etc.)
+
+---
+
+### 🧠 Architecture (Windows)
+
+- Flutter Desktop UI
+- Python backend (bundled via PyInstaller)
+- WASAPI-native audio capture (no PortAudio instability)
+- Local Whisper transcription + Ollama processing
+
+---
+
+💡 This version is designed for **zero-friction usage** — download → run → go.
 
 ```bash
 git clone https://github.com/PhsycoCommando/VoiceForge.git
@@ -90,6 +184,44 @@ assets/      icons and static resources
 * Single-instance UI enforcement
 * Improved process lifecycle handling
 * Resolved intermittent connection issues on first launch
+
+---
+
+## 🧪 Development Notes (Windows Build)
+
+**Build Date:** 4/16/2026  
+**Dev Time:** ~20 hours (2-day push)
+
+This release represents a major milestone:
+
+- ✅ Full Windows standalone build (no Python required)
+- ✅ Backend packaged with PyInstaller
+- ✅ Audio system stabilized after extensive WASAPI / WDM debugging
+- ✅ Microphone selection system implemented (UI + backend sync)
+- ✅ Port conflict handling added for dev + production coexistence
+- ✅ Cross-platform Flutter foundation expanded (Windows/Linux/macOS ready)
+
+---
+
+### ⚔️ Known Battle (Audio)
+
+Audio capture on Windows required:
+
+- Eliminating PortAudio instability
+- Handling WASAPI device routing (including Voicemeeter / Voicemod)
+- Preventing WDM-KS driver crashes (`-9999 WdmSyncIoctl`)
+- Implementing persistent / singleton recording strategies
+
+This build reflects a **fully stabilized workaround architecture**.
+
+---
+
+🚀 Future improvements will focus on:
+
+- Setup installer (MSI / EXE installer)
+- Model preloading & offline optimization
+- UI/UX polish
+- Multi-device / system audio capture expansion
 
 ## 💰 Support
 
