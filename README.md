@@ -82,8 +82,12 @@ assets/      icons and static resources
 
 ## 🧪 Status
 
-v0.1.0 — First usable release
-Actively being improved
+🔥 **Latest Release: [v0.1.1](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v0.1.1) — Stability Patch**
+
+* Fixed dock/launcher relaunch on Pop!_OS (COSMIC / Wayland)
+* Single-instance UI enforcement
+* Improved process lifecycle handling
+* Resolved intermittent connection issues on first launch
 
 ## 💰 Support
 
