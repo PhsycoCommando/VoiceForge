@@ -7,6 +7,7 @@ import '../widgets/mic_button.dart';
 import '../widgets/mic_selector.dart';
 import '../widgets/mode_selector.dart';
 import '../widgets/connection_indicator.dart';
+import '../widgets/file_transcribe_button.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,10 +21,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _ws = WebSocketService();
 
   // Modes shown in the UI (filtered from backend)
-  static const _visibleModes = ['raw', 'clean', 'bullet', 'summary', 'prompt'];
+  static const _visibleModes = ['raw', 'clean', 'bullet', 'summary', 'prompt', 'markdown', 'speech'];
 
   // State
   bool _isRecording = false;
+  bool _isTranscribing = false;
   bool _isProcessing = false;
   String _currentMode = 'clean';
   List<String> _availableModes = _visibleModes;
@@ -31,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Paragraph-based transcription
   String _liveText = '';
+  int _sessionStartOffset = 0; // where the current recording session begins in _rawController
   final TextEditingController _rawController = TextEditingController();
   String _formattedOutput = '';         // right panel content
 
@@ -84,39 +87,53 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       switch (event.type) {
         case 'partial':
-          _liveText = event.raw;
-          break;
-
-        case 'final':
-          _liveText = '';
-          // Append to controller text (preserves user edits)
-          final existing = _rawController.text;
-          if (existing.isEmpty) {
-            _rawController.text = event.raw;
-          } else {
-            _rawController.text = '$existing ${event.raw}';
-          }
-          // Move cursor to end
-          _rawController.selection = TextSelection.collapsed(
-            offset: _rawController.text.length,
-          );
-          if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
-          break;
-
-        case 'paragraph_break':
-          // Long pause → new paragraph (double newline)
-          final text = _rawController.text;
-          if (text.isNotEmpty && !text.endsWith('\n\n')) {
-            _rawController.text = '$text\n\n';
+          // Write partial text directly into the raw panel from the session
+          // start offset, replacing as Whisper updates its running transcript.
+          {
+            final before = _rawController.text.substring(0, _sessionStartOffset);
+            _rawController.text = before + event.raw;
             _rawController.selection = TextSelection.collapsed(
               offset: _rawController.text.length,
             );
+            if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
           }
           break;
 
+        case 'final':
+          _isTranscribing = false;
+          _liveText = '';
+          // Replace from _sessionStartOffset with the definitive transcription.
+          {
+            final before = _rawController.text.substring(0, _sessionStartOffset);
+            _rawController.text = before + event.raw;
+            _rawController.selection = TextSelection.collapsed(
+              offset: _rawController.text.length,
+            );
+            if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+          }
+          break;
+
+        case 'paragraph_break':
+          break; // handled by pause detection now
+
         case 'status':
-          if (event.status == 'started') _isRecording = true;
-          if (event.status == 'stopped') _isRecording = false;
+          if (event.status == 'started') {
+            _isRecording = true;
+            // Insert separator if there's existing text, then mark where this
+            // session begins so partials and the final can update in-place.
+            if (_rawController.text.isNotEmpty) {
+              _rawController.text = '${_rawController.text}\n\n─────────────────────\n\n';
+              _rawController.selection = TextSelection.collapsed(
+                offset: _rawController.text.length,
+              );
+              if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+            }
+            _sessionStartOffset = _rawController.text.length;
+          }
+          if (event.status == 'stopped') {
+            _isRecording = false;
+            _isTranscribing = false; // clear if final never came (empty recording)
+          }
           if (event.status == 'mode_changed') {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
           }
@@ -126,6 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 .toList();
           }
           break;
+
 
         case 'error':
           _showSnackbar('⚠️ ${event.message}', isError: true);
@@ -148,7 +166,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Process Full Session: uses current raw text from controller.
   Future<void> _processFullSession() async {
-    final rawText = _rawController.text.trim();
+    // Strip session separators — visual only, never sent to formatter.
+    var rawText = _rawController.text
+        .split('\n')
+        .where((line) => !line.trim().startsWith('─'))
+        .join('\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
+
+    // Pause dots (3+ consecutive periods) are stripped for clean/raw modes
+    // but kept for bullet/summary/markdown/prompt where they hint at thought breaks.
+    const modesWithoutDots = {'clean', 'raw'};
+    if (modesWithoutDots.contains(_currentMode)) {
+      rawText = rawText
+          .replaceAll(RegExp(r'\.{3,}'), '')
+          .replaceAll(RegExp(r'  +'), ' ')
+          .trim();
+    }
+
+
 
     if (rawText.isEmpty) {
       _showSnackbar('Nothing to process yet');
@@ -207,13 +243,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _toggleRecording() async {
+    // Optimistically flip state immediately so the UI feels responsive.
+    // The WS status event will confirm or correct this.
+    final wasRecording = _isRecording;
+    setState(() {
+      _isRecording = !wasRecording;
+      if (wasRecording) {
+        _liveText = '';       // clear partial bubble on stop
+        _isTranscribing = true; // Whisper is now processing
+      }
+    });
+
     try {
-      if (_isRecording) {
+      if (wasRecording) {
         await _api.stopStream();
       } else {
         await _api.startStream();
       }
     } catch (e) {
+      // Revert optimistic state on failure
+      setState(() => _isRecording = wasRecording);
       _showSnackbar('Connection error: $e', isError: true);
     }
   }
@@ -225,6 +274,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _liveText = '';
     });
     _api.clearSession().catchError((_) => <String, dynamic>{});
+  }
+
+  /// Called when a file is successfully transcribed — appends to raw panel.
+  void _onFileTranscribed(String rawText, String filename) {
+    setState(() {
+      final existing = _rawController.text;
+      final prefix = existing.isEmpty ? '' : '\n\n';
+      _rawController.text = '$existing${prefix}$rawText';
+      _rawController.selection = TextSelection.collapsed(
+        offset: _rawController.text.length,
+      );
+    });
+    _scrollToBottom(_rawScroll);
+    _showSnackbar('✅ Transcribed: $filename');
   }
 
   Future<void> _confirmClear() async {
@@ -281,44 +344,26 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          // Main content
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                _buildTopBar(),
-                const SizedBox(height: 20),
-                Expanded(child: _buildPanels()),
-                const SizedBox(height: 20),
-                _buildBottomBar(),
-              ],
-            ),
-          ),
-
-          // Floating mic button — always accessible, bottom-center
-          Positioned(
-            bottom: 52,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: MicButton(
-                isRecording: _isRecording,
-                isConnected: _connectionState == WsConnectionState.connected,
-                onPressed: _toggleRecording,
-              ),
-            ),
-          ),
-        ],
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            _buildTopBar(),
+            const SizedBox(height: 20),
+            Expanded(child: _buildPanels()),
+            const SizedBox(height: 20),
+            _buildBottomBar(),
+          ],
+        ),
       ),
     );
   }
 
   AppStatus get _appStatus {
     if (_connectionState != WsConnectionState.connected) return AppStatus.disconnected;
-    if (_isProcessing) return AppStatus.processing;
-    if (_isRecording) return AppStatus.listening;
+    if (_isProcessing)    return AppStatus.processing;
+    if (_isTranscribing) return AppStatus.transcribing;
+    if (_isRecording)    return AppStatus.listening;
     return AppStatus.ready;
   }
 
@@ -346,6 +391,18 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(width: 12),
         MicSelector(api: _api),
+        const SizedBox(width: 12),
+        Container(
+          width: 1,
+          height: 24,
+          color: Colors.white.withValues(alpha: 0.1),
+        ),
+        const SizedBox(width: 12),
+        // ── File transcribe ──────────────────────────────────────────────────
+        FileTranscribeButton(
+          api: _api,
+          onTranscribed: _onFileTranscribed,
+        ),
         const Spacer(),
         TextButton.icon(
           onPressed: _confirmClear,
@@ -401,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(16),
@@ -409,7 +466,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          // Mode chips
+          // Mode chips — clicking a chip selects AND processes immediately
           Flexible(
             child: ModeSelector(
               currentMode: _currentMode,
@@ -418,40 +475,32 @@ class _HomeScreenState extends State<HomeScreen> {
               isProcessing: _isProcessing,
             ),
           ),
-          const SizedBox(width: 12),
 
-          // Process button
-          ElevatedButton.icon(
-             onPressed: _isProcessing ? null : _processFullSession,
-             icon: _isProcessing 
-                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                 : const Icon(Icons.bolt_rounded, size: 16),
-             label: Text(_isProcessing ? 'Processing...' : 'Process'),
-             style: ElevatedButton.styleFrom(
-               backgroundColor: const Color(0xFF6C5CE7),
-               foregroundColor: Colors.white,
-               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-               elevation: 0,
-             ),
-          ),
+          // ↺ Reprocess icon — re-runs current mode
           const SizedBox(width: 8),
-
-          // Reprocess button
-          OutlinedButton.icon(
-             onPressed: (_isProcessing || _formattedOutput.isEmpty) ? null : _reprocessOutput,
-             icon: const Icon(Icons.refresh_rounded, size: 16),
-             label: const Text('Reprocess'),
-             style: OutlinedButton.styleFrom(
-               foregroundColor: const Color(0xFFA29BFE),
-               side: BorderSide(color: const Color(0xFFA29BFE).withValues(alpha: 0.4)),
-               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-             ),
+          Tooltip(
+            message: 'Reprocess with current mode',
+            child: IconButton(
+              onPressed: (_isProcessing || _formattedOutput.isEmpty) ? null : _reprocessOutput,
+              icon: _isProcessing
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFA29BFE)))
+                  : const Icon(Icons.refresh_rounded, size: 18, color: Color(0xFFA29BFE)),
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xFFA29BFE).withValues(alpha: 0.08),
+                disabledBackgroundColor: Colors.transparent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.all(10),
+              ),
+            ),
           ),
 
-          // Spacer to push content left, mic floats above via Stack
-          const Spacer(),
+          // ── Mic button — right end of bar ────────────────────────────────
+          const SizedBox(width: 12),
+          MicButton(
+            isRecording: _isRecording,
+            isConnected: _connectionState == WsConnectionState.connected,
+            onPressed: _toggleRecording,
+          ),
         ],
       ),
     );

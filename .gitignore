@@ -57,3 +57,4 @@ ui/build/
 # Misc
 *.log
 backend/
+*.zip

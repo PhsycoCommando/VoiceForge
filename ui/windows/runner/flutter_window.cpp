@@ -65,6 +65,15 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+
+    case WM_GETMINMAXINFO: {
+      // Enforce minimum window size so chips + mic button never get clipped.
+      // 900 wide × 600 tall is the smallest that fits all 6 mode chips + mic.
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = 900;
+      info->ptMinTrackSize.y = 600;
+      return 0;
+    }
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

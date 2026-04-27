@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 enum AppStatus {
   listening,
+  transcribing,
   processing,
   ready,
   disconnected,
@@ -16,10 +17,11 @@ class StatusIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (color, label) = switch (state) {
-      AppStatus.listening => (const Color(0xFF00B894), 'Listening'),
-      AppStatus.processing => (const Color(0xFFFDCB6E), 'Processing...'),
-      AppStatus.ready => (const Color(0xFF74B9FF), 'Ready'),
-      AppStatus.disconnected => (const Color(0xFFFF6B6B), 'Disconnected'),
+      AppStatus.listening     => (const Color(0xFF00B894), 'Listening'),
+      AppStatus.transcribing  => (const Color(0xFFFFA500), 'Transcribing...'),
+      AppStatus.processing    => (const Color(0xFFFDCB6E), 'Processing...'),
+      AppStatus.ready         => (const Color(0xFF74B9FF), 'Ready'),
+      AppStatus.disconnected  => (const Color(0xFFFF6B6B), 'Disconnected'),
     };
 
     return Container(

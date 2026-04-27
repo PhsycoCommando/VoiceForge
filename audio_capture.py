@@ -15,6 +15,7 @@ Key design principles:
   - 300 ms delay before opening WASAPI to let virtual drivers settle.
 """
 
+import ctypes
 import time
 import numpy as np
 import soundcard as sc
@@ -236,11 +237,11 @@ def _init_recorder():
     try:
         _microphone = mic
         _capture_sr = native_sr
-        # Shared mode (no exclusive flags) — blocksize=1024 ≈ 64 ms @ 16 kHz
+        # Shared mode (no exclusive flags) — blocksize=256 for fast stop response
         _recorder = _microphone.recorder(
             samplerate=native_sr,
             channels=channels,
-            blocksize=1024,
+            blocksize=256,
         )
         print(f"✅ Recorder created: {mic.name} @ {native_sr} Hz (shared mode)")
     except Exception as e:
@@ -256,7 +257,7 @@ def _init_recorder():
             _recorder    = fallback.recorder(
                 samplerate=fb_rate,
                 channels=1,
-                blocksize=1024,
+                blocksize=256,
             )
             print(f"✅ Fallback recorder: {fallback.name} @ {fb_rate} Hz")
         except Exception as e2:
@@ -276,16 +277,39 @@ def get_native_sample_rate(device_id=None) -> int:
 
 
 def start_recording(device=None):
-    global _is_recording
-
-    _init_recorder()
+    global _is_recording, _recorder, _microphone, _capture_sr
 
     if _is_recording:
         return
 
-    _recorder.__enter__()
+    # Initialize COM for this thread — required by WASAPI on Windows
+    try:
+        ctypes.windll.ole32.CoInitialize(None)
+    except Exception:
+        pass
+
+    # 💥 Always ensure fresh valid recorder session
+    if _recorder is not None:
+        try:
+            _recorder.__exit__(None, None, None)
+        except Exception:
+            pass
+
+        _recorder = None
+        _microphone = None
+        _capture_sr = None
+
+    # 🔁 Rebuild clean
+    _init_recorder()
+
+    try:
+        _recorder.__enter__()
+    except Exception as e:
+        print(f"[Audio] Failed to enter recorder: {e}")
+        return
+
     _is_recording = True
-    print("🎤 Recording started")
+    print("🎤 Recording started (fresh session)")
 
 
 def stop_recording():
@@ -295,11 +319,8 @@ def stop_recording():
         return
 
     _is_recording = False
-    try:
-        _recorder.__exit__(None, None, None)
-    except Exception:
-        pass
-    print("🎤 Recording stopped")
+
+    print("🎤 Recording stopped (soft stop)")
 
 
 # ---------------------------------------------------------------------------
@@ -307,37 +328,89 @@ def stop_recording():
 # ---------------------------------------------------------------------------
 
 def audio_stream(device_id=None, sample_rate=None):
+    global _recorder, _microphone, _capture_sr
+
     """
     Generator that yields audio chunks as numpy arrays (N, 1) float32 at
     16 000 Hz, ready for the Whisper transcription pipeline.
 
     Captures at the device's native rate and resamples if necessary.
+
+    IMPORTANT: start_recording() MUST be called before iterating this
+    generator.  audio_stream() is a pure data pipe — it does NOT manage
+    the recording lifecycle.
     """
-    start_recording(device_id)
 
     try:
-        while True:
-            if _is_recording:
-                raw = _recorder.record(numframes=1024)
+        while _is_recording:
 
-                # Ensure (N, channels) float32
-                if raw.ndim == 1:
-                    raw = raw[:, np.newaxis]
-                raw = raw.astype(np.float32)
+            # 🧠 Ensure recorder exists
+            if _recorder is None:
+                try:
+                    _init_recorder()
+                    _recorder.__enter__()
+                    print("[Audio] Recorder reinitialized")
+                except Exception as e:
+                    print(f"[Audio] Failed to initialize recorder: {e}")
+                    time.sleep(0.5)
+                    continue
 
-                # Resample to 16 kHz if device runs at a different rate
-                if _capture_sr and _capture_sr != _WHISPER_SR:
-                    raw = _resample(raw, _capture_sr)
+            try:
+                # Pull audio in smaller chunks to reduce blocking delay
+                raw = _recorder.record(numframes=256)
 
-                # Collapse to mono (N, 1) if multi-channel
-                if raw.shape[1] > 1:
-                    raw = raw.mean(axis=1, keepdims=True)
+            except Exception as e:
+                print(f"[Audio] Recorder error: {e}")
+                print("[Audio] Recorder lost — attempting recovery...")
 
-                yield raw
-            else:
-                time.sleep(0.05)
+                # Reset broken recorder state
+                try:
+                    _recorder.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+                _recorder = None
+                _microphone = None
+                _capture_sr = None
+
+                time.sleep(0.5)
+
+                try:
+                    _init_recorder()
+                    _recorder.__enter__()
+                    print("[Audio] Recovery successful")
+                    continue
+                except Exception as e2:
+                    print(f"[Audio] Recovery failed: {e2}")
+                    print("[Audio] Stopping recording")
+                    stop_recording()
+                    time.sleep(0.5)
+                    continue
+
+            # Ensure (N, channels) float32
+            if raw.ndim == 1:
+                raw = raw[:, np.newaxis]
+            raw = raw.astype(np.float32)
+
+            # Resample to 16 kHz if needed
+            if _capture_sr and _capture_sr != _WHISPER_SR:
+                raw = _resample(raw, _capture_sr)
+
+            # Collapse to mono if needed
+            if raw.shape[1] > 1:
+                raw = raw.mean(axis=1, keepdims=True)
+
+            # Exit cleanly after processing — no partial pipeline push
+            if not _is_recording:
+                break
+
+            yield raw
+
     except GeneratorExit:
-        stop_recording()
-        raise
+        # Pipeline is tearing us down — just exit cleanly.
+        # stop_recording() is called by the pipeline, not the generator.
+        pass
+
     finally:
-        stop_recording()
+        # Nothing to clean up — lifecycle is owned by the pipeline.
+        pass

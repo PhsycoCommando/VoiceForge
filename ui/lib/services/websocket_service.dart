@@ -50,6 +50,11 @@ class WebSocketService {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+
+  // Set to true when the user explicitly calls disconnect() —
+  // prevents the reconnect loop from firing after an intentional close.
+  bool _intentionalDisconnect = false;
 
   // Event streams
   final _eventController = StreamController<TranscriptionEvent>.broadcast();
@@ -73,12 +78,14 @@ class WebSocketService {
   // ---------------------------------------------------------------------------
 
   /// Connect to the WebSocket endpoint.
+  /// State stays [connecting] until the backend's status handshake arrives.
   void connect() {
     if (_state == WsConnectionState.connecting ||
         _state == WsConnectionState.connected) {
       return;
     }
 
+    _intentionalDisconnect = false;
     _setState(WsConnectionState.connecting);
 
     try {
@@ -90,15 +97,19 @@ class WebSocketService {
         onDone: _onDone,
       );
 
-      _setState(WsConnectionState.connected);
+      // NOTE: Do NOT call _setState(connected) here.
+      // We stay in [connecting] until the backend sends its status handshake.
+      // See _onMessage where status=="connected" triggers the state change.
     } catch (e) {
       _setState(WsConnectionState.error);
       _scheduleReconnect();
     }
   }
 
-  /// Disconnect from the WebSocket.
+  /// Disconnect from the WebSocket. Will not auto-reconnect.
   void disconnect() {
+    _intentionalDisconnect = true;
+    _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _subscription?.cancel();
     _channel?.sink.close();
@@ -135,6 +146,13 @@ class WebSocketService {
       final data = jsonDecode(message as String) as Map<String, dynamic>;
       final event = TranscriptionEvent.fromJson(data);
 
+      // Backend sends {"type":"status","status":"connected"} immediately on WS accept.
+      // This is the handshake — only NOW do we declare ourselves truly connected.
+      if (event.type == 'status' && data['status'] == 'connected') {
+        _reconnectAttempts = 0;
+        _setState(WsConnectionState.connected);
+      }
+
       // Capture available modes from initial status
       if (event.type == 'status' && data.containsKey('available_modes')) {
         availableModes =
@@ -149,12 +167,15 @@ class WebSocketService {
 
   void _onError(dynamic error) {
     _setState(WsConnectionState.error);
-    _scheduleReconnect();
+    if (!_intentionalDisconnect) _scheduleReconnect();
   }
 
   void _onDone() {
-    _setState(WsConnectionState.disconnected);
-    _scheduleReconnect();
+    // The WS closed — only reconnect if this wasn't intentional.
+    if (!_intentionalDisconnect) {
+      _setState(WsConnectionState.disconnected);
+      _scheduleReconnect();
+    }
   }
 
   void _setState(WsConnectionState state) {
@@ -164,8 +185,13 @@ class WebSocketService {
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), () {
-      if (_state != WsConnectionState.connected) {
+
+    // Exponential backoff: 2s, 4s, 8s, 16s, max 30s
+    final backoffSeconds = (2 * (1 << _reconnectAttempts.clamp(0, 4)));
+    _reconnectAttempts++;
+
+    _reconnectTimer = Timer(Duration(seconds: backoffSeconds), () {
+      if (_state != WsConnectionState.connected && !_intentionalDisconnect) {
         connect();
       }
     });

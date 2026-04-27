@@ -4,6 +4,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiService {
@@ -88,6 +89,22 @@ class ApiService {
   Future<Map<String, dynamic>> clearSession() async {
     final resp = await _client.post(Uri.parse('$baseUrl/session/clear'));
     return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Transcribe a local audio file via the backend /transcribe endpoint.
+  /// Supported formats: WAV, MP3, MP4, M4A, OGG, FLAC, WEBM, OPUS
+  /// Returns {'raw': '...', 'clean': '...', 'mode': '...'}.
+  Future<Map<String, dynamic>> transcribeFile(String filePath, {String mode = 'raw'}) async {
+    final uri = Uri.parse('$baseUrl/transcribe');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['mode'] = mode
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await _client.send(request);
+    final body = await http.Response.fromStream(streamed);
+    if (body.statusCode != 200) {
+      throw Exception('Transcribe failed (${body.statusCode}): ${body.body}');
+    }
+    return jsonDecode(body.body) as Map<String, dynamic>;
   }
 
   // ---------------------------------------------------------------------------

@@ -20,6 +20,11 @@ Run:
 # --- PyInstaller compatibility fixes ---
 # Must run BEFORE any imports that pull in torch/faster_whisper/ctranslate2.
 import sys as _sys, os as _os
+import os
+# Disable PyTorch JIT & dynamic inspection (global)
+os.environ["TORCH_JIT"] = "0"
+os.environ["PYTORCH_JIT"] = "0"
+os.environ["TORCH_DISABLE_DYNAMIC_MODULE"] = "1"
 
 if getattr(_sys, 'frozen', False):
     # 1. Redirect stdout/stderr — noconsole mode uses cp1252 which chokes on emoji
@@ -61,6 +66,19 @@ if getattr(_sys, 'frozen', False):
     _inspect.findsource = _safe_findsource
     _inspect.getsourcelines = _safe_getsourcelines
     _inspect.getsource = _safe_getsource
+
+    # 4. Disable TorchScript source parsing completely —
+    #    torch._sources.parse_def bypasses inspect and reads raw .py files,
+    #    which don't exist inside PyInstaller bundles.
+    try:
+        import torch._sources as _torch_sources
+
+        def _safe_parse_def(*args, **kwargs):
+            return None
+
+        _torch_sources.parse_def = _safe_parse_def
+    except Exception:
+        pass
 
 import asyncio
 import io
@@ -233,13 +251,17 @@ class PipelineManager:
 
     def _run(self):
         """Pipeline loop — captures raw speech, NO formatting."""
-        from audio_capture import audio_stream, get_native_sample_rate
+        from audio_capture import audio_stream, get_native_sample_rate, \
+            start_recording, stop_recording
         from speech_detector import extract_speech_segments
 
         last_partial_text = ""
 
         try:
             native_sr = get_native_sample_rate()
+
+            # --- API owns the recording lifecycle ---
+            start_recording()
 
             event_bus.publish({
                 "type": "status",
@@ -305,8 +327,12 @@ class PipelineManager:
                 "message": str(e),
             })
         finally:
-            # Close generators to set _is_recording = False in audio_capture.
-            # The underlying InputStream stays alive (persistent stream).
+            # --- API owns the recording lifecycle ---
+            # Stop recording FIRST so the generator loop exits cleanly.
+            stop_recording()
+
+            # Close generators (they will exit immediately since
+            # _is_recording is already False).
             try:
                 events.close()
             except Exception:

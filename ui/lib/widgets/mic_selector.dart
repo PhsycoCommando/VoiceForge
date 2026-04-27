@@ -59,8 +59,20 @@ class _MicSelectorState extends State<MicSelector> {
     try {
       final info = await widget.api.getCurrentMicrophone();
       if (!mounted) return;
+      final name = info['name'] as String?;
       setState(() {
-        _selectedName = info['name'] as String?;
+        _selectedName = name;
+        // Match name → ID so the dropdown shows a real selected item,
+        // not just a hint. Without this _selectedId stays null → "Auto".
+        if (name != null) {
+          final match = _mics.firstWhere(
+            (m) => m['name'] == name,
+            orElse: () => {},
+          );
+          if (match.isNotEmpty) {
+            _selectedId = match['id'] as int?;
+          }
+        }
       });
     } catch (_) {}
   }

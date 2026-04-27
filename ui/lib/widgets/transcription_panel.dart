@@ -90,12 +90,32 @@ class TranscriptionPanel extends StatelessWidget {
           ],
           const Spacer(),
           if (showCopyButton && (entries.isNotEmpty || (textController != null && textController!.text.isNotEmpty)))
-            _CopyButton(textToCopy: textController != null ? textController!.text : entries.join('\n\n')),
+            _CopyButton(
+              textToCopy: textController != null
+                  ? _stripSeparators(textController!.text)
+                  : entries.join('\n\n'),
+            ),
           if (isLive)
             _PulsingDot(color: accentColor),
         ],
       ),
     );
+  }
+
+  /// Strip visual markers (session separators + pause dots) before copying.
+  /// Only removes separators and pause-dot sequences — normal punctuation untouched.
+  static String _stripSeparators(String text) {
+    final lines = text.split('\n');
+    final cleaned = lines
+        .where((line) => !line.trim().startsWith('─'))
+        .join('\n');
+    // Collapse 3+ consecutive newlines → 2
+    var result = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    // Strip pause-dot markers (3+ consecutive dots used as silence indicators)
+    result = result.replaceAll(RegExp(r'\.{3,}'), '');
+    // Clean up any double-spaces left behind
+    result = result.replaceAll(RegExp(r'  +'), ' ');
+    return result.trim();
   }
 
   Widget _buildContent() {
