@@ -381,6 +381,27 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
     });
   }
 
+  /// Pull-to-refresh handler: reconnect WS if down, else just ping status.
+  Future<void> _onRefresh() async {
+    if (_connectionState != WsConnectionState.connected) {
+      _ws.disconnect();
+      await Future.delayed(const Duration(milliseconds: 300));
+      _ws.connect();
+      await Future.delayed(const Duration(seconds: 2));
+    } else {
+      await _fetchStatus();
+    }
+    if (!mounted) return;
+    final connected = _connectionState == WsConnectionState.connected;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(connected ? '✓ Connected — ready' : '⚡ Reconnecting…'),
+      duration: const Duration(seconds: 2),
+      backgroundColor: connected ? const Color(0xFF00B894) : const Color(0xFF6C5CE7),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
+  }
+
   // ── AppStatus ──────────────────────────────────────────────────────────────
 
   AppStatus get _appStatus {
@@ -474,12 +495,26 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
   }
 
   Widget _buildPageView() {
+    const refreshColor     = Color(0xFF6C5CE7);
+    const refreshBgColor   = Color(0xFF1A1A2E);
     return PageView(
       controller: _pageCtrl,
       onPageChanged: (i) => setState(() => _currentPage = i),
       children: [
-        _buildRawPage(),
-        _buildFormattedPage(),
+        RefreshIndicator(
+          onRefresh: _onRefresh,
+          color: refreshColor,
+          backgroundColor: refreshBgColor,
+          displacement: 60,
+          child: _buildRawPage(),
+        ),
+        RefreshIndicator(
+          onRefresh: _onRefresh,
+          color: refreshColor,
+          backgroundColor: refreshBgColor,
+          displacement: 60,
+          child: _buildFormattedPage(),
+        ),
       ],
     );
   }
@@ -510,8 +545,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
               ),
             ),
             const Divider(height: 1, color: Color(0xFF2A2A3E)),
-            // Content — always show TextField so user can tap to type.
-            // When empty, hint text guides the user instead of a dead placeholder.
+            // Content — always a TextField so overscroll triggers RefreshIndicator.
             Expanded(
               child: Scrollbar(
                 controller: _rawScroll,
@@ -519,8 +553,9 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
                   controller: _rawController,
                   scrollController: _rawScroll,
                   maxLines: null,
-                  expands: true,   // fills the Expanded so the whole area is tappable
+                  expands: true,
                   textAlignVertical: TextAlignVertical.top,
+                  scrollPhysics: const AlwaysScrollableScrollPhysics(),
                   style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
                   decoration: const InputDecoration(
                     contentPadding: EdgeInsets.all(16),
@@ -573,28 +608,41 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
               ),
             ),
             const Divider(height: 1, color: Color(0xFF2A2A3E)),
-            // Content
+            // Content — empty state scrollable so swipe-down refresh still works.
             Expanded(
               child: _fmtController.text.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.mic_off_rounded, size: 40, color: Colors.white12),
-                          SizedBox(height: 12),
-                          Text('Select a mode and tap ↺ to process',
-                              style: TextStyle(color: Colors.white24, fontSize: 13)),
-                        ],
+                  ? LayoutBuilder(
+                      builder: (context, constraints) => SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: SizedBox(
+                          height: constraints.maxHeight,
+                          child: const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.auto_fix_high_rounded, size: 40, color: Colors.white12),
+                                SizedBox(height: 12),
+                                Text('Select a mode and tap ↺ to process',
+                                    style: TextStyle(color: Colors.white24, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     )
                   : Scrollbar(
                       controller: _fmtScroll,
-                      child: SingleChildScrollView(
-                        controller: _fmtScroll,
-                        padding: const EdgeInsets.all(16),
-                        child: SelectableText(
-                          _formattedOutput,
-                          style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+                      child: TextField(
+                        controller: _fmtController,
+                        scrollController: _fmtScroll,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        scrollPhysics: const AlwaysScrollableScrollPhysics(),
+                        style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.all(16),
+                          border: InputBorder.none,
                         ),
                       ),
                     ),
