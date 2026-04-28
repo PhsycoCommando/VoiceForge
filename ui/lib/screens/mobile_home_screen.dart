@@ -434,33 +434,27 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
               ),
             ),
             const Divider(height: 1, color: Color(0xFF2A2A3E)),
-            // Content
+            // Content — always show TextField so user can tap to type.
+            // When empty, hint text guides the user instead of a dead placeholder.
             Expanded(
-              child: _rawController.text.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.mic_none_rounded, size: 40, color: Colors.white12),
-                          SizedBox(height: 12),
-                          Text('Tap 🎤 to start recording',
-                              style: TextStyle(color: Colors.white24, fontSize: 13)),
-                        ],
-                      ),
-                    )
-                  : Scrollbar(
-                      controller: _rawScroll,
-                      child: TextField(
-                        controller: _rawController,
-                        scrollController: _rawScroll,
-                        maxLines: null,
-                        style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
-                        decoration: const InputDecoration(
-                          contentPadding: EdgeInsets.all(16),
-                          border: InputBorder.none,
-                        ),
-                      ),
-                    ),
+              child: Scrollbar(
+                controller: _rawScroll,
+                child: TextField(
+                  controller: _rawController,
+                  scrollController: _rawScroll,
+                  maxLines: null,
+                  expands: true,   // fills the Expanded so the whole area is tappable
+                  textAlignVertical: TextAlignVertical.top,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
+                  decoration: const InputDecoration(
+                    contentPadding: EdgeInsets.all(16),
+                    border: InputBorder.none,
+                    hintText: 'Tap 🎤 to start recording, or type here…',
+                    hintStyle: TextStyle(color: Colors.white24, fontSize: 13),
+                    hintMaxLines: 2,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
