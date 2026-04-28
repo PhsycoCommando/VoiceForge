@@ -803,13 +803,22 @@ async def get_current_microphone():
 async def transform_text(req: TransformRequest):
     """
     Transform raw text using the specified formatting mode.
-    Also saves the formatted output to the active session folder.
+    Saves the output to the active session folder and broadcasts
+    the result to all connected WebSocket clients so every device
+    shows the same formatted panel immediately.
     """
     try:
         fmt = Formatter(mode=req.mode)
         formatted = fmt.format(req.text)
         # Persist every formatted output
         session_mgr.save_formatted(req.mode, formatted)
+        # Broadcast so desktop/phone both update their formatted panel
+        event_bus.publish({
+            "type": "formatted",
+            "formatted": formatted,
+            "mode": req.mode,
+            "timestamp": time.time(),
+        })
         return {
             "raw": req.text,
             "formatted": formatted,
@@ -1116,6 +1125,18 @@ async def websocket_stream(websocket: WebSocket):
                     event_bus.publish_except({
                         "type": "text_update",
                         "raw": new_text,
+                    }, exclude_id=sub_id)
+
+                elif command == "formatted_update":
+                    # A client manually edited the formatted panel —
+                    # broadcast to all OTHER clients so they mirror it.
+                    fmt_text = data.get("text", "")
+                    fmt_mode = data.get("mode", "clean")
+                    event_bus.publish_except({
+                        "type": "formatted",
+                        "formatted": fmt_text,
+                        "mode": fmt_mode,
+                        "timestamp": time.time(),
                     }, exclude_id=sub_id)
 
                 elif command == "clear":

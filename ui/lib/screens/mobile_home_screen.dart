@@ -25,7 +25,8 @@ class MobileHomeScreen extends StatefulWidget {
   State<MobileHomeScreen> createState() => _MobileHomeScreenState();
 }
 
-class _MobileHomeScreenState extends State<MobileHomeScreen> {
+class _MobileHomeScreenState extends State<MobileHomeScreen>
+    with WidgetsBindingObserver {
   // ── Services (built from HostConfig) ──────────────────────────────────────
   late ApiService       _api;
   late WebSocketService _ws;
@@ -45,6 +46,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   // Transcript
   int    _sessionStartOffset = 0;
   final  TextEditingController _rawController = TextEditingController();
+  final  TextEditingController _fmtController = TextEditingController();
   String _formattedOutput = '';
 
   // Subscriptions
@@ -57,6 +59,10 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   // Text sync
   bool _suppressTextUpdate = false;
   Timer? _textUpdateDebounce;
+
+  // Formatted sync
+  bool _suppressFmtUpdate = false;
+  Timer? _fmtUpdateDebounce;
 
   // Set to true when THIS client sends the start command.
   // Only the initiating device adds the visual separator to avoid doubles.
@@ -81,7 +87,9 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
       }
     });
     _rawController.addListener(_onRawTextChanged);
+    _fmtController.addListener(_onFmtTextChanged);
     _initServices();
+    WidgetsBinding.instance.addObserver(this);
 
     // If still on localhost, phone can't connect — redirect to Settings immediately.
     if (HostConfig.isLocalhost) {
@@ -114,6 +122,26 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
     _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
       _ws.sendTextUpdate(_rawController.text);
     });
+  }
+
+  void _onFmtTextChanged() {
+    if (_suppressFmtUpdate) return;
+    _fmtUpdateDebounce?.cancel();
+    _fmtUpdateDebounce = Timer(const Duration(milliseconds: 600), () {
+      _ws.sendFormattedUpdate(_currentMode, _fmtController.text);
+    });
+  }
+
+  // Reconnect WebSocket when app returns to foreground
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_connectionState != WsConnectionState.connected) {
+        // Force fresh reconnect — the old socket is likely dead
+        _ws.disconnect();
+        Future.delayed(const Duration(milliseconds: 300), _ws.connect);
+      }
+    }
   }
 
   void _initServices() {
@@ -149,13 +177,16 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _textUpdateDebounce?.cancel();
+    _fmtUpdateDebounce?.cancel();
     _eventSub?.cancel();
     _connSub?.cancel();
     _mic.dispose();
     _ws.dispose();
     _api.dispose();
     _rawController.dispose();
+    _fmtController.dispose();
     _rawScroll.dispose();
     _fmtScroll.dispose();
     _pageCtrl.dispose();
@@ -220,9 +251,13 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           }
           if (event.status == 'cleared') {
             _textUpdateDebounce?.cancel();
+            _fmtUpdateDebounce?.cancel();
             _suppressTextUpdate = true;
             _rawController.clear();
             _suppressTextUpdate = false;
+            _suppressFmtUpdate = true;
+            _fmtController.clear();
+            _suppressFmtUpdate = false;
             _formattedOutput    = '';
             _sessionStartOffset = 0;
             _sessionIsLocal = true;
@@ -247,6 +282,19 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           _suppressTextUpdate = false;
           _sessionIsLocal = true;
           if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+
+        case 'formatted':
+          // Another device ran a transform OR edited the formatted panel — mirror it.
+          _suppressFmtUpdate = true;
+          _fmtController.text = event.formatted;
+          _formattedOutput = event.formatted;
+          _suppressFmtUpdate = false;
+          if (event.mode.isNotEmpty) _currentMode = event.mode;
+          // Auto-navigate to formatted page
+          if (_fmtController.text.isNotEmpty && _currentPage == 0) {
+            _pageCtrl.animateToPage(1,
+                duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+          }
       }
     });
   }
@@ -298,14 +346,17 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
 
     setState(() => _isProcessing = true);
     try {
-      await _api.setMode(_currentMode);
       if (_currentMode == 'raw') {
-        setState(() => _formattedOutput = rawText);
+        _suppressFmtUpdate = true;
+        _fmtController.text = rawText;
+        _formattedOutput = rawText;
+        _suppressFmtUpdate = false;
       } else {
         final result = await _api.transform(rawText, _currentMode);
-        setState(() {
-          _formattedOutput = result['formatted'] as String? ?? rawText;
-        });
+        _suppressFmtUpdate = true;
+        _fmtController.text = result['formatted'] as String? ?? rawText;
+        _formattedOutput = _fmtController.text;
+        _suppressFmtUpdate = false;
       }
       // Auto-navigate to formatted page after processing
       if (_currentPage == 0) {
@@ -396,14 +447,17 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
             onTap: () {
               _textUpdateDebounce?.cancel();
               setState(() {
-                _suppressTextUpdate = true;
-                _rawController.text = '';
-                _suppressTextUpdate = false;
-                _formattedOutput    = '';
-                _sessionStartOffset = 0;
-                _sessionIsLocal = true;
-              });
-              _ws.sendClear();
+              _suppressTextUpdate = true;
+              _rawController.text = '';
+              _suppressTextUpdate = false;
+              _suppressFmtUpdate = true;
+              _fmtController.clear();
+              _suppressFmtUpdate = false;
+              _formattedOutput    = '';
+              _sessionStartOffset = 0;
+              _sessionIsLocal = true;
+            });
+            _ws.sendClear();
             },
             child: Container(
               padding: const EdgeInsets.all(8),
@@ -521,7 +575,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
             const Divider(height: 1, color: Color(0xFF2A2A3E)),
             // Content
             Expanded(
-              child: _formattedOutput.isEmpty
+              child: _fmtController.text.isEmpty
                   ? const Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,

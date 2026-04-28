@@ -35,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _liveText = '';
   int _sessionStartOffset = 0; // where the current recording session begins in _rawController
   final TextEditingController _rawController = TextEditingController();
-  String _formattedOutput = '';         // right panel content
+  final TextEditingController _fmtController = TextEditingController();
 
   // Subscriptions
   StreamSubscription? _eventSub;
@@ -47,6 +47,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // Text sync — suppress the debounce echo when we receive a remote text_update
   bool _suppressTextUpdate = false;
   Timer? _textUpdateDebounce;
+
+  // Formatted sync — suppress echo when applying a remote formatted event
+  bool _suppressFmtUpdate = false;
+  Timer? _fmtUpdateDebounce;
 
   // Set to true when THIS client sends the start command.
   // Only the initiating device adds the visual separator to avoid doubles.
@@ -67,6 +71,8 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     // Send debounced text_update when the user types in the raw panel
     _rawController.addListener(_onRawTextChanged);
+    // Send debounced formatted_update when the user edits the formatted panel
+    _fmtController.addListener(_onFmtTextChanged);
     _setupWebSocket();
   }
 
@@ -102,6 +108,16 @@ class _HomeScreenState extends State<HomeScreen> {
     _textUpdateDebounce?.cancel();
     _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
       _ws.sendTextUpdate(_rawController.text);
+    });
+  }
+
+  /// Debounced formatted-text listener — sends formatted_update 500ms after
+  /// the user stops editing the formatted panel.
+  void _onFmtTextChanged() {
+    if (_suppressFmtUpdate) return;
+    _fmtUpdateDebounce?.cancel();
+    _fmtUpdateDebounce = Timer(const Duration(milliseconds: 600), () {
+      _ws.sendFormattedUpdate(_currentMode, _fmtController.text);
     });
   }
 
@@ -183,10 +199,13 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           if (event.status == 'cleared') {
             _textUpdateDebounce?.cancel();
+            _fmtUpdateDebounce?.cancel();
             _suppressTextUpdate = true;
             _rawController.clear();
             _suppressTextUpdate = false;
-            _formattedOutput = '';
+            _suppressFmtUpdate = true;
+            _fmtController.clear();
+            _suppressFmtUpdate = false;
             _liveText = '';
             _sessionStartOffset = 0;
             _sessionIsLocal = true;
@@ -216,6 +235,15 @@ class _HomeScreenState extends State<HomeScreen> {
           );
           _suppressTextUpdate = false;
           _sessionIsLocal = true; // received authoritative text — edits can sync again
+          break;
+
+        case 'formatted':
+          // Another device ran a transform OR edited the formatted panel — mirror it.
+          _suppressFmtUpdate = true;
+          _fmtController.text = event.formatted;
+          _suppressFmtUpdate = false;
+          if (event.mode.isNotEmpty) _currentMode = event.mode;
+          if (_fmtController.text.isNotEmpty) _scrollToBottom(_fmtScroll);
           break;
       }
     });
@@ -267,12 +295,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Transform using selected mode
       if (_currentMode == 'raw') {
-        setState(() => _formattedOutput = rawText);
+        _suppressFmtUpdate = true;
+        _fmtController.text = rawText;
+        _suppressFmtUpdate = false;
       } else {
         final result = await _api.transform(rawText, _currentMode);
-        setState(() {
-          _formattedOutput = result['formatted'] as String? ?? rawText;
-        });
+        _suppressFmtUpdate = true;
+        _fmtController.text = result['formatted'] as String? ?? rawText;
+        _suppressFmtUpdate = false;
       }
       _scrollToBottom(_fmtScroll);
     } catch (e) {
@@ -284,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Reprocess: re-runs current formatted output through the selected mode.
   Future<void> _reprocessOutput() async {
-    if (_formattedOutput.trim().isEmpty) {
+    if (_fmtController.text.trim().isEmpty) {
       _showSnackbar('Nothing to reprocess');
       return;
     }
@@ -299,10 +329,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      final result = await _api.transform(_formattedOutput, _currentMode);
-      setState(() {
-        _formattedOutput = result['formatted'] as String? ?? _formattedOutput;
-      });
+      final result = await _api.transform(_fmtController.text, _currentMode);
+      _suppressFmtUpdate = true;
+      _fmtController.text = result['formatted'] as String? ?? _fmtController.text;
+      _suppressFmtUpdate = false;
       _scrollToBottom(_fmtScroll);
     } catch (e) {
       _showSnackbar('Reprocess failed: $e', isError: true);
@@ -338,12 +368,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _clearTranscript() {
-    _textUpdateDebounce?.cancel(); // prevent stale debounce from restoring text
+    _textUpdateDebounce?.cancel();
+    _fmtUpdateDebounce?.cancel();
     setState(() {
       _suppressTextUpdate = true;
       _rawController.clear();
       _suppressTextUpdate = false;
-      _formattedOutput = '';
+      _suppressFmtUpdate = true;
+      _fmtController.clear();
+      _suppressFmtUpdate = false;
       _liveText = '';
       _sessionStartOffset = 0;
       _sessionIsLocal = true;
@@ -489,11 +522,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildPanels() {
-    // RIGHT: formatted output (single block)
-    final fmtEntries = _formattedOutput.isNotEmpty
-        ? [_formattedOutput]
-        : <String>[];
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -513,13 +541,14 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(width: 16),
 
-        // RIGHT PANEL: Formatted output — on-demand
+        // RIGHT PANEL: Formatted output — editable, mirrors other device
         Expanded(
           child: TranscriptionPanel(
             title: 'Formatted Output',
             icon: Icons.auto_fix_high_rounded,
             accentColor: const Color(0xFF6C5CE7),
-            entries: fmtEntries,
+            entries: const [],
+            textController: _fmtController,
             scrollController: _fmtScroll,
             showMode: true,
             mode: _currentMode,
@@ -555,7 +584,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Tooltip(
             message: 'Reprocess with current mode',
             child: IconButton(
-              onPressed: (_isProcessing || _formattedOutput.isEmpty) ? null : _reprocessOutput,
+              onPressed: (_isProcessing || _fmtController.text.isEmpty) ? null : _reprocessOutput,
               icon: _isProcessing
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFA29BFE)))
                   : const Icon(Icons.refresh_rounded, size: 18, color: Color(0xFFA29BFE)),
@@ -582,11 +611,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _textUpdateDebounce?.cancel();
+    _fmtUpdateDebounce?.cancel();
     _eventSub?.cancel();
     _connSub?.cancel();
     _ws.dispose();
     _api.dispose();
     _rawController.dispose();
+    _fmtController.dispose();
     _rawScroll.dispose();
     _fmtScroll.dispose();
     super.dispose();

@@ -142,6 +142,10 @@ class WebSocketService {
   void sendTextUpdate(String text) =>
       sendCommand('text_update', params: {'text': text});
 
+  /// Send a formatted-panel edit to sync with other clients.
+  void sendFormattedUpdate(String mode, String text) =>
+      sendCommand('formatted_update', params: {'mode': mode, 'text': text});
+
   /// Broadcast a clear to all clients.
   void sendClear() => sendCommand('clear');
 
