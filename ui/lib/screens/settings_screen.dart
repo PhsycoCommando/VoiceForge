@@ -265,6 +265,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _PresetChip(label: '100.64.x.x', onTap: () => setState(() => _hostCtrl.text = '100.64.')),
                 ],
               ),
+
+              const SizedBox(height: 28),
+
+              // ── Sessions folder ─────────────────────────────────────────
+              const Text('Sessions', style: TextStyle(color: Colors.white54, fontSize: 12, letterSpacing: 0.8)),
+              const SizedBox(height: 8),
+              _OpenSessionsFolderButton(
+                host: _hostCtrl.text.trim(),
+                port: int.tryParse(_portCtrl.text.trim()) ?? 8000,
+              ),
             ],
           ),
         ),
@@ -291,6 +301,71 @@ class _PresetChip extends StatelessWidget {
         ),
         child: Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
       ),
+    );
+  }
+}
+
+
+/// Calls /sessions/open-folder on the backend which opens Explorer on the PC.
+/// Works from both desktop and mobile (the PC does the folder opening).
+class _OpenSessionsFolderButton extends StatefulWidget {
+  final String host;
+  final int port;
+  const _OpenSessionsFolderButton({required this.host, required this.port});
+
+  @override
+  State<_OpenSessionsFolderButton> createState() => _OpenSessionsFolderButtonState();
+}
+
+class _OpenSessionsFolderButtonState extends State<_OpenSessionsFolderButton> {
+  bool _loading = false;
+  String? _result;
+  bool _ok = false;
+
+  Future<void> _open() async {
+    setState(() { _loading = true; _result = null; });
+    try {
+      final resp = await http
+          .get(Uri.parse('http://${widget.host}:${widget.port}/sessions/open-folder'))
+          .timeout(const Duration(seconds: 5));
+      final ok = resp.statusCode == 200;
+      setState(() {
+        _ok = ok;
+        _result = ok ? '✅ Opened sessions folder on PC' : '❌ Server error ${resp.statusCode}';
+      });
+    } catch (e) {
+      setState(() { _ok = false; _result = '❌ Could not reach backend: $e'; });
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton.icon(
+          onPressed: _loading ? null : _open,
+          icon: _loading
+              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.folder_open_rounded, size: 16),
+          label: Text(_loading ? 'Opening...' : 'Open Sessions Folder'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF00B894),
+            side: const BorderSide(color: Color(0xFF00B894)),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        if (_result != null) ...[
+          const SizedBox(height: 8),
+          Text(_result!, style: TextStyle(
+            fontSize: 12,
+            color: _ok ? const Color(0xFF00B894) : Colors.red.shade300,
+          )),
+        ],
+      ],
     );
   }
 }
