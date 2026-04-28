@@ -59,6 +59,15 @@ class BackendService {
       dbg('Backend not running: $e');
     }
 
+    // Kill any orphaned pythonw.exe that may be holding port 8000.
+    if (Platform.isWindows) {
+      dbg('Killing orphaned pythonw.exe processes...');
+      try {
+        await Process.run('taskkill', ['/F', '/IM', 'pythonw.exe']);
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
     await _spawnProcess(dbg);
   }
 
