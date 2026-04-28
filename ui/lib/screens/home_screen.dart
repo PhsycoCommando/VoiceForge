@@ -44,6 +44,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _fmtScroll = ScrollController();
   bool _shouldAutoScrollRaw = true;
 
+  // Text sync — suppress the debounce echo when we receive a remote text_update
+  bool _suppressTextUpdate = false;
+  Timer? _textUpdateDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -52,17 +56,41 @@ class _HomeScreenState extends State<HomeScreen> {
         _shouldAutoScrollRaw = _rawScroll.position.pixels >= _rawScroll.position.maxScrollExtent - 50;
       }
     });
+    // Send debounced text_update when the user types in the raw panel
+    _rawController.addListener(_onRawTextChanged);
     _setupWebSocket();
   }
 
   void _setupWebSocket() {
     _connSub = _ws.connectionState.listen((state) {
       setState(() => _connectionState = state);
-      if (state == WsConnectionState.connected) _fetchStatus();
+      if (state == WsConnectionState.connected) {
+        _fetchStatus();
+        // Restore session text if backend has prior content (e.g. phone recorded)
+        if (_ws.sessionText.isNotEmpty && _rawController.text.isEmpty) {
+          setState(() {
+            _suppressTextUpdate = true;
+            _rawController.text = _ws.sessionText;
+            _suppressTextUpdate = false;
+          });
+        }
+      }
     });
 
     _eventSub = _ws.events.listen(_handleEvent);
     _ws.connect();
+  }
+
+  /// Debounced raw-text listener — sends text_update 500ms after the user
+  /// stops typing. Suppressed during recording/transcribing (backend is the
+  /// source of truth) and when we're applying a remote text_update ourselves.
+  void _onRawTextChanged() {
+    if (_suppressTextUpdate) return;
+    if (_isRecording || _isTranscribing) return;
+    _textUpdateDebounce?.cancel();
+    _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
+      _ws.sendTextUpdate(_rawController.text);
+    });
   }
 
   Future<void> _fetchStatus() async {
@@ -134,6 +162,15 @@ class _HomeScreenState extends State<HomeScreen> {
             _isRecording = false;
             _isTranscribing = false; // clear if final never came (empty recording)
           }
+          if (event.status == 'cleared') {
+            // Another client cleared the session
+            _suppressTextUpdate = true;
+            _rawController.clear();
+            _suppressTextUpdate = false;
+            _formattedOutput = '';
+            _liveText = '';
+            _sessionStartOffset = 0;
+          }
           if (event.status == 'mode_changed') {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
           }
@@ -147,6 +184,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
         case 'error':
           _showSnackbar('⚠️ ${event.message}', isError: true);
+          break;
+
+        case 'text_update':
+          // Another client (phone or second desktop) edited the raw panel.
+          // Apply without triggering our own debounce echo.
+          _suppressTextUpdate = true;
+          _rawController.text = event.raw;
+          _rawController.selection = TextSelection.collapsed(
+            offset: _rawController.text.length,
+          );
+          _suppressTextUpdate = false;
           break;
       }
     });
@@ -269,11 +317,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _clearTranscript() {
     setState(() {
+      _suppressTextUpdate = true;
       _rawController.clear();
+      _suppressTextUpdate = false;
       _formattedOutput = '';
       _liveText = '';
+      _sessionStartOffset = 0;
     });
-    _api.clearSession().catchError((_) => <String, dynamic>{});
+    // Broadcast clear to all connected clients via WebSocket
+    _ws.sendClear();
   }
 
   /// Called when a file is successfully transcribed — appends to raw panel.

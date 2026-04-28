@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import '../services/host_config.dart';
+import '../services/phone_mic_service.dart';
 import '../services/websocket_service.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/mic_button.dart';
@@ -28,6 +29,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   // ── Services (built from HostConfig) ──────────────────────────────────────
   late ApiService       _api;
   late WebSocketService _ws;
+  late PhoneMicService  _mic;
 
   // ── Modes ──────────────────────────────────────────────────────────────────
   static const _visibleModes = ['raw', 'clean', 'bullet', 'summary', 'prompt', 'markdown', 'speech'];
@@ -52,6 +54,10 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   final ScrollController _fmtScroll = ScrollController();
   bool _shouldAutoScrollRaw = true;
 
+  // Text sync
+  bool _suppressTextUpdate = false;
+  Timer? _textUpdateDebounce;
+
   // Page controller for swipe between Raw / Formatted
   final PageController _pageCtrl = PageController();
   int _currentPage = 0;
@@ -67,15 +73,35 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
             _rawScroll.position.pixels >= _rawScroll.position.maxScrollExtent - 50;
       }
     });
+    _rawController.addListener(_onRawTextChanged);
     _initServices();
+  }
+
+  void _onRawTextChanged() {
+    if (_suppressTextUpdate) return;
+    if (_isRecording || _isTranscribing) return;
+    _textUpdateDebounce?.cancel();
+    _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
+      _ws.sendTextUpdate(_rawController.text);
+    });
   }
 
   void _initServices() {
     _api = ApiService(baseUrl: HostConfig.baseUrl);
     _ws  = WebSocketService(wsUrl: HostConfig.wsUrl);
+    _mic = PhoneMicService(_ws);
     _connSub = _ws.connectionState.listen((state) {
       setState(() => _connectionState = state);
-      if (state == WsConnectionState.connected) _fetchStatus();
+      if (state == WsConnectionState.connected) {
+        _fetchStatus();
+        // Restore session text from backend handshake (if phone connects mid-session)
+        if (_ws.sessionText.isNotEmpty && _rawController.text.isEmpty) {
+          _suppressTextUpdate = true;
+          _rawController.text = _ws.sessionText;
+          _suppressTextUpdate = false;
+          setState(() {});
+        }
+      }
     });
     _eventSub = _ws.events.listen(_handleEvent);
     _ws.connect();
@@ -86,14 +112,17 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
     _connSub?.cancel();
     _ws.dispose();
     _api.dispose();
+    _mic.dispose();
     setState(() => _connectionState = WsConnectionState.disconnected);
     _initServices();
   }
 
   @override
   void dispose() {
+    _textUpdateDebounce?.cancel();
     _eventSub?.cancel();
     _connSub?.cancel();
+    _mic.dispose();
     _ws.dispose();
     _api.dispose();
     _rawController.dispose();
@@ -152,6 +181,13 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
             _isRecording    = false;
             _isTranscribing = false;
           }
+          if (event.status == 'cleared') {
+            _suppressTextUpdate = true;
+            _rawController.clear();
+            _suppressTextUpdate = false;
+            _formattedOutput    = '';
+            _sessionStartOffset = 0;
+          }
           if (event.status == 'mode_changed') {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
           }
@@ -163,6 +199,13 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('⚠️ ${event.message}'), backgroundColor: Colors.red.shade800),
           );
+
+        case 'text_update':
+          _suppressTextUpdate = true;
+          _rawController.text = event.raw;
+          _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
+          _suppressTextUpdate = false;
+          if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
       }
     });
   }
@@ -170,18 +213,19 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   // ── Recording ──────────────────────────────────────────────────────────────
 
   Future<void> _toggleRecording() async {
-    try {
-      if (_isRecording) {
-        setState(() { _isRecording = false; _isTranscribing = true; });
-        await _api.stopStream();
-      } else {
-        await _api.clearSession();
-        await _api.startStream();
+    if (_isRecording) {
+      setState(() { _isRecording = false; _isTranscribing = true; });
+      await _mic.stop();
+    } else {
+      final started = await _mic.start();
+      if (!started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Microphone permission denied'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red.shade800),
-      );
     }
   }
 
@@ -309,10 +353,13 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           GestureDetector(
             onTap: () {
               setState(() {
+                _suppressTextUpdate = true;
                 _rawController.text = '';
+                _suppressTextUpdate = false;
                 _formattedOutput    = '';
                 _sessionStartOffset = 0;
               });
+              _ws.sendClear();
             },
             child: Container(
               padding: const EdgeInsets.all(8),

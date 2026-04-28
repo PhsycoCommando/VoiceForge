@@ -6,6 +6,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// A single transcription event from the backend.
@@ -71,6 +72,10 @@ class WebSocketService {
   // Available modes (populated from initial status message)
   List<String> availableModes = [];
 
+  /// Current session text from the last handshake (or text_update events).
+  /// Clients use this to restore the raw panel on connect.
+  String sessionText = '';
+
   WebSocketService({this.wsUrl = 'ws://localhost:8000/stream'});
 
   // ---------------------------------------------------------------------------
@@ -128,11 +133,24 @@ class WebSocketService {
     _channel!.sink.add(jsonEncode(msg));
   }
 
+  /// Send raw binary data (PCM audio frames from phone mic).
+  void sendBinary(Uint8List bytes) {
+    _channel?.sink.add(bytes);
+  }
+
+  /// Send a raw text edit to sync with other clients.
+  void sendTextUpdate(String text) =>
+      sendCommand('text_update', params: {'text': text});
+
+  /// Broadcast a clear to all clients.
+  void sendClear() => sendCommand('clear');
+
   /// Set mode via WebSocket command.
   void setMode(String mode) => sendCommand('set_mode', params: {'mode': mode});
 
-  /// Start pipeline via WebSocket command.
-  void start() => sendCommand('start');
+  /// Start pipeline via WebSocket command (source: "wasapi" or "phone").
+  void start({String source = 'wasapi'}) =>
+      sendCommand('start', params: {'source': source});
 
   /// Stop pipeline via WebSocket command.
   void stop() => sendCommand('stop');
@@ -143,6 +161,9 @@ class WebSocketService {
 
   void _onMessage(dynamic message) {
     try {
+      // Binary message = not a JSON event (shouldn't happen server→client, but guard)
+      if (message is List<int>) return;
+
       final data = jsonDecode(message as String) as Map<String, dynamic>;
       final event = TranscriptionEvent.fromJson(data);
 
@@ -150,6 +171,10 @@ class WebSocketService {
       // This is the handshake — only NOW do we declare ourselves truly connected.
       if (event.type == 'status' && data['status'] == 'connected') {
         _reconnectAttempts = 0;
+        // Restore session text if backend provides it (reconnect scenario)
+        if (data.containsKey('session_text')) {
+          sessionText = data['session_text'] as String? ?? '';
+        }
         _setState(WsConnectionState.connected);
       }
 
@@ -157,6 +182,11 @@ class WebSocketService {
       if (event.type == 'status' && data.containsKey('available_modes')) {
         availableModes =
             (data['available_modes'] as List).cast<String>().toList();
+      }
+
+      // Track latest session text from text_update events
+      if (event.type == 'text_update') {
+        sessionText = event.raw;
       }
 
       _eventController.add(event);
