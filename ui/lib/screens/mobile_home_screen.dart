@@ -75,6 +75,28 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
     });
     _rawController.addListener(_onRawTextChanged);
     _initServices();
+
+    // If still on localhost, phone can't connect — redirect to Settings immediately.
+    if (HostConfig.isLocalhost) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openSettingsForFirstTime());
+    }
+  }
+
+  Future<void> _openSettingsForFirstTime() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('📱 Enter your PC’s Tailscale IP to connect'),
+        duration: Duration(seconds: 4),
+        backgroundColor: Color(0xFF6C5CE7),
+      ),
+    );
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(onHostSaved: _reinitServices),
+      ),
+    );
   }
 
   void _onRawTextChanged() {
