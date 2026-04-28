@@ -52,6 +52,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _suppressFmtUpdate = false;
   Timer? _fmtUpdateDebounce;
 
+  // Safety timeout: clears _isTranscribing if Whisper never sends 'final'.
+  // Prevents the UI from freezing when the backend hangs mid-transcription.
+  Timer? _transcribeTimeout;
+  static const _kTranscribeTimeoutSecs = 30;
+
   // Set to true when THIS client sends the start command.
   // Only the initiating device adds the visual separator to avoid doubles.
   bool _isInitiatingRecording = false;
@@ -156,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
           break;
 
         case 'final':
+          _transcribeTimeout?.cancel();
           _isTranscribing = false;
           _liveText = '';
           // Replace from _sessionStartOffset with the definitive transcription.
@@ -188,6 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           if (event.status == 'stopped') {
             _isRecording = false;
+            _transcribeTimeout?.cancel();
             _isTranscribing = false;
             // Safety: restore edit rights on non-initiating device after 2s
             // in case the authoritative text_update never arrives.
@@ -200,6 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (event.status == 'cleared') {
             _textUpdateDebounce?.cancel();
             _fmtUpdateDebounce?.cancel();
+            _transcribeTimeout?.cancel();
             _suppressTextUpdate = true;
             _rawController.clear();
             _suppressTextUpdate = false;
@@ -350,6 +358,20 @@ class _HomeScreenState extends State<HomeScreen> {
       if (wasRecording) {
         _liveText = '';       // clear partial bubble on stop
         _isTranscribing = true; // Whisper is now processing
+        // Safety net: if backend hangs and never sends 'final', unlock UI.
+        _transcribeTimeout?.cancel();
+        _transcribeTimeout = Timer(
+          const Duration(seconds: _kTranscribeTimeoutSecs),
+          () {
+            if (_isTranscribing && mounted) {
+              setState(() => _isTranscribing = false);
+              _showSnackbar(
+                '\u26a0\ufe0f Transcription timed out — backend may be busy. Try again.',
+                isError: true,
+              );
+            }
+          },
+        );
       }
     });
 
@@ -370,6 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _clearTranscript() {
     _textUpdateDebounce?.cancel();
     _fmtUpdateDebounce?.cancel();
+    _transcribeTimeout?.cancel();
     setState(() {
       _suppressTextUpdate = true;
       _rawController.clear();
@@ -613,6 +636,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _textUpdateDebounce?.cancel();
     _fmtUpdateDebounce?.cancel();
+    _transcribeTimeout?.cancel();
     _eventSub?.cancel();
     _connSub?.cancel();
     _ws.dispose();
