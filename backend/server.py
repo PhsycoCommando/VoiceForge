@@ -1101,7 +1101,14 @@ async def websocket_stream(websocket: WebSocket):
         try:
             while True:
                 event = await queue.get()
-                await websocket.send_json(event)
+                try:
+                    await asyncio.wait_for(
+                        websocket.send_json(event),
+                        timeout=10.0,
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[WS] Send timed out for client {sub_id} — dropping")
+                    return
         except (WebSocketDisconnect, RuntimeError):
             pass
 
@@ -1233,7 +1240,14 @@ async def websocket_stream(websocket: WebSocket):
         try:
             while True:
                 await asyncio.sleep(20)
-                await websocket.send_json({"type": "ping"})
+                try:
+                    await asyncio.wait_for(
+                        websocket.send_json({"type": "ping"}),
+                        timeout=5.0,
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[WS] Keepalive timed out for client {sub_id} — dropping")
+                    return
         except Exception:
             pass
 
@@ -1252,6 +1266,10 @@ async def websocket_stream(websocket: WebSocket):
         pass
     finally:
         event_bus.unsubscribe(sub_id)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
         print(f"WebSocket client disconnected (id={sub_id}, remaining={event_bus.subscriber_count})")
 
 
