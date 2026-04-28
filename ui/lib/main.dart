@@ -4,6 +4,7 @@ import 'dart:ui' show AppExitResponse;
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'screens/mobile_home_screen.dart';
+import 'services/backend_service.dart';
 import 'services/host_config.dart';
 
 // ─── Single-instance lock via ServerSocket port bind ─────────────────────────
@@ -39,9 +40,6 @@ void _releaseInstanceLock() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tracked backend process — null if we didn't spawn it (was already running).
-Process? _backendProcess;
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await HostConfig.load();
@@ -58,148 +56,9 @@ void main() async {
     exit(0);
   }
 
-  await _launchBackend();
+  await BackendService.instance.launch();
   runApp(const VoiceForgeApp());
 }
-
-/// Launches the Python backend via the bundled venv if not already running.
-///
-/// Checks port 8000 first — if the backend is reachable, skips launch.
-/// Otherwise, launches `backend/venv/Scripts/pythonw.exe server.py`
-/// (falls back to python.exe if pythonw.exe is missing).
-///
-/// Uses [ProcessStartMode.detachedWithStdio] so we retain a handle to
-/// kill the process on clean app exit, while still letting it survive
-/// an app crash. pythonw.exe ensures no console window is shown.
-Future<void> _launchBackend() async {
-  final log = File('${Directory.systemTemp.path}\\vf_backend_debug.txt');
-  void dbg(String msg) {
-    log.writeAsStringSync('[${DateTime.now()}] $msg\n', mode: FileMode.append);
-  }
-
-  dbg('=== _launchBackend START ===');
-  dbg('Platform.resolvedExecutable: ${Platform.resolvedExecutable}');
-  dbg('Directory.current: ${Directory.current.path}');
-
-  // Check if backend is already running on port 8000.
-  // Wrap in a hard 3-second timeout: if the backend accepts the TCP connection
-  // but never sends an HTTP response (e.g. still loading Whisper), the app
-  // would hang here indefinitely and the window would never appear.
-  try {
-    final statusCode = await Future(() async {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-      try {
-        final request = await client.getUrl(Uri.parse('http://localhost:8000/'));
-        final response = await request.close();
-        await response.drain<void>();
-        client.close();
-        return response.statusCode;
-      } finally {
-        client.close();
-      }
-    }).timeout(const Duration(seconds: 3), onTimeout: () => -1);
-
-    if (statusCode == 200) {
-      dbg('Backend already running — reusing.');
-      return;
-    }
-    dbg('Backend responded with status $statusCode — will try to respawn.');
-  } catch (e) {
-    dbg('Backend not running: $e');
-  }
-
-  // Resolve backend directory — try multiple possible locations
-  final exeDir = File(Platform.resolvedExecutable).parent.path;
-  final sep = Platform.pathSeparator;
-  final possiblePaths = [
-    '$exeDir${sep}backend',
-    '$exeDir$sep..$sep${sep}backend',
-    '${Directory.current.path}${sep}backend',
-  ];
-
-  dbg('exeDir: $exeDir');
-  for (final p in possiblePaths) {
-    dbg('Checking path: $p → exists=${Directory(p).existsSync()}');
-  }
-
-  String? backendDir;
-  for (final path in possiblePaths) {
-    if (Directory(path).existsSync()) {
-      backendDir = path;
-      break;
-    }
-  }
-
-  if (backendDir == null) {
-    dbg('FATAL: Backend folder NOT found. Giving up.');
-    return;
-  }
-
-  dbg('Using backendDir: $backendDir');
-
-  // Prefer pythonw.exe (no console window), fall back to python.exe
-  final pythonwPath = '$backendDir${sep}venv${sep}Scripts${sep}pythonw.exe';
-  final pythonPath  = '$backendDir${sep}venv${sep}Scripts${sep}python.exe';
-  final pythonw = File(pythonwPath);
-  final python  = File(pythonPath);
-
-  dbg('pythonw exists: ${await pythonw.exists()} at $pythonwPath');
-  dbg('python  exists: ${await python.exists()}  at $pythonPath');
-
-  final interpreter = await pythonw.exists()
-      ? pythonw.path
-      : (await python.exists() ? python.path : null);
-
-  if (interpreter == null) {
-    dbg('FATAL: No Python interpreter found.');
-    return;
-  }
-
-  dbg('Interpreter: $interpreter');
-
-  final env = Map<String, String>.from(Platform.environment);
-  env['PYTHONIOENCODING'] = 'utf-8';
-  // VOICEFORGE_MOCK_WAV intentionally not set -- mic uses real microphone.
-
-  try {
-    _backendProcess = await Process.start(
-      interpreter,
-      ['server.py'],
-      mode: ProcessStartMode.detachedWithStdio,
-      workingDirectory: backendDir,
-      environment: env,
-    );
-    dbg('Backend spawned — PID: ${_backendProcess!.pid}');
-
-    // Capture backend stdout/stderr to a log file for diagnosis
-    final backendLog = File('${Directory.systemTemp.path}\\vf_backend_process.txt');
-    _backendProcess!.stdout.listen((data) {
-      backendLog.writeAsBytesSync(data, mode: FileMode.append);
-    });
-    _backendProcess!.stderr.listen((data) {
-      backendLog.writeAsBytesSync(data, mode: FileMode.append);
-    });
-  } catch (e, st) {
-    dbg('FATAL: Process.start threw: $e\n$st');
-    return;
-  }
-
-  // Give the backend just enough time to bind the port.
-  // The WS service's reconnect loop handles the rest — no need to block here
-  // for the full 30-60s Whisper load time.
-  await Future.delayed(const Duration(seconds: 1));
-  dbg('_launchBackend DONE — UI will launch now, WS will retry until backend ready.');
-}
-
-/// Kills the backend process if we spawned it.
-void _killBackend() {
-  try {
-    _backendProcess?.kill(ProcessSignal.sigterm);
-  } catch (_) {}
-  _backendProcess = null;
-}
-
-
 
 
 class VoiceForgeApp extends StatefulWidget {
@@ -217,7 +76,7 @@ class _VoiceForgeAppState extends State<VoiceForgeApp> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onExitRequested: () async {
-        _killBackend();
+        BackendService.instance.kill();
         _releaseInstanceLock();
         return AppExitResponse.exit;
       },
@@ -227,7 +86,7 @@ class _VoiceForgeAppState extends State<VoiceForgeApp> {
   @override
   void dispose() {
     _lifecycleListener.dispose();
-    _killBackend();
+    BackendService.instance.kill();
     _releaseInstanceLock();
     super.dispose();
   }

@@ -229,10 +229,19 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
 
         case 'final':
           _isTranscribing = false;
-          final before = _rawController.text.substring(0, _sessionStartOffset);
-          _rawController.text = before + event.raw;
-          _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
-          if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+          // Only the initiating device writes the final transcription to the raw
+          // panel. Non-initiating device waits for the authoritative text_update
+          // from the initiating device, which includes the session separator.
+          if (_sessionIsLocal) {
+            final before = _rawController.text.substring(0, _sessionStartOffset);
+            _rawController.text = before + event.raw;
+            _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
+            if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+            // Explicitly broadcast the complete text (with separator) to other
+            // clients. The debounce listener is blocked while _isTranscribing
+            // was true, so it never fires — we send directly here instead.
+            _ws.sendTextUpdate(_rawController.text);
+          }
 
         case 'paragraph_break':
           break;
@@ -414,6 +423,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
   // ── AppStatus ──────────────────────────────────────────────────────────────
 
   AppStatus get _appStatus {
+    if (_connectionState == WsConnectionState.connecting) return AppStatus.reconnecting;
     if (_connectionState != WsConnectionState.connected) return AppStatus.disconnected;
     if (_isTranscribing) return AppStatus.transcribing;
     if (_isRecording)    return AppStatus.listening;

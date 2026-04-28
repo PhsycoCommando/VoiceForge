@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/backend_service.dart';
 import '../services/websocket_service.dart';
 import '../widgets/transcription_panel.dart';
 import '../widgets/mic_button.dart';
@@ -173,14 +175,20 @@ class _HomeScreenState extends State<HomeScreen> {
           _transcribeTimeout?.cancel();
           _isTranscribing = false;
           _liveText = '';
-          // Replace from _sessionStartOffset with the definitive transcription.
-          {
+          // Only the initiating device writes the final transcription to the raw
+          // panel. Non-initiating device waits for the authoritative text_update
+          // from the initiating device, which includes the session separator.
+          if (_sessionIsLocal) {
             final before = _rawController.text.substring(0, _sessionStartOffset);
             _rawController.text = before + event.raw;
             _rawController.selection = TextSelection.collapsed(
               offset: _rawController.text.length,
             );
             if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
+            // Explicitly broadcast the complete text (with separator) to other
+            // clients. The debounce listener is blocked while _isTranscribing
+            // was true, so it never fires — we send directly here instead.
+            _ws.sendTextUpdate(_rawController.text);
           }
           break;
 
@@ -358,6 +366,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Kill + relaunch the Python backend, then reconnect WS.
+  Future<void> _restartBackend() async {
+    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
+    _showSnackbar('🔄 Restarting backend…');
+    await BackendService.instance.restart();
+    _ws.disconnect();
+    await Future.delayed(const Duration(milliseconds: 300));
+    _ws.connect();
+  }
+
   Future<void> _toggleRecording() async {
     // Optimistically flip state immediately so the UI feels responsive.
     // The WS status event will confirm or correct this.
@@ -500,6 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   AppStatus get _appStatus {
+    if (_connectionState == WsConnectionState.connecting) return AppStatus.reconnecting;
     if (_connectionState != WsConnectionState.connected) return AppStatus.disconnected;
     if (_isProcessing)    return AppStatus.processing;
     if (_isTranscribing) return AppStatus.transcribing;
@@ -523,6 +542,24 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(width: 16),
         StatusIndicator(state: _appStatus),
+        // Restart Backend button — visible only when disconnected
+        if (_connectionState != WsConnectionState.connected) ...[
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Restart backend',
+            child: IconButton(
+              onPressed: _restartBackend,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              style: IconButton.styleFrom(
+                foregroundColor: const Color(0xFFFF6B6B),
+                backgroundColor: const Color(0xFFFF6B6B).withValues(alpha: 0.1),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.all(6),
+                minimumSize: const Size(32, 32),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(width: 16),
         Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.1)),
         const SizedBox(width: 12),

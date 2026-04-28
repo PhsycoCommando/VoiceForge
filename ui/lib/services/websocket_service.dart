@@ -110,6 +110,13 @@ class WebSocketService {
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
+      // Catch connection-phase errors that bypass the stream listener.
+      // Without this, a refused connection throws an unhandled exception
+      // that crashes the entire app.
+      _channel!.ready.catchError((error) {
+        _onError(error);
+      });
+
       _subscription = _channel!.stream.listen(
         _onMessage,
         onError: _onError,
