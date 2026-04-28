@@ -76,6 +76,14 @@ class WebSocketService {
   /// Clients use this to restore the raw panel on connect.
   String sessionText = '';
 
+  // Watchdog: track last server message time to detect silent socket drops.
+  DateTime _lastActivity = DateTime.now();
+  Timer? _watchdogTimer;
+
+  // Watchdog interval and dead-socket threshold
+  static const _watchdogInterval = Duration(seconds: 30);
+  static const _deadSocketThreshold = Duration(seconds: 40);
+
   WebSocketService({this.wsUrl = 'ws://localhost:8000/stream'});
 
   // ---------------------------------------------------------------------------
@@ -92,6 +100,7 @@ class WebSocketService {
 
     _intentionalDisconnect = false;
     _setState(WsConnectionState.connecting);
+    _lastActivity = DateTime.now();
 
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
@@ -101,6 +110,9 @@ class WebSocketService {
         onError: _onError,
         onDone: _onDone,
       );
+
+      // Start watchdog — detects silent drops (Android Doze, etc.)
+      _startWatchdog();
 
       // NOTE: Do NOT call _setState(connected) here.
       // We stay in [connecting] until the backend sends its status handshake.
@@ -116,6 +128,7 @@ class WebSocketService {
     _intentionalDisconnect = true;
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
+    _watchdogTimer?.cancel();
     _subscription?.cancel();
     _channel?.sink.close();
     _channel = null;
@@ -164,12 +177,16 @@ class WebSocketService {
   // ---------------------------------------------------------------------------
 
   void _onMessage(dynamic message) {
+    _lastActivity = DateTime.now(); // reset watchdog on every received frame
     try {
       // Binary message = not a JSON event (shouldn't happen server→client, but guard)
       if (message is List<int>) return;
 
       final data = jsonDecode(message as String) as Map<String, dynamic>;
       final event = TranscriptionEvent.fromJson(data);
+
+      // Absorb keepalive pings — don't route to UI
+      if (event.type == 'ping') return;
 
       // Backend sends {"type":"status","status":"connected"} immediately on WS accept.
       // This is the handshake — only NOW do we declare ourselves truly connected.
@@ -231,8 +248,28 @@ class WebSocketService {
     });
   }
 
+  /// Watchdog: periodically checks that the server is still sending pings.
+  /// Android Doze Mode silently kills sockets without firing onDone/onError.
+  void _startWatchdog() {
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer.periodic(_watchdogInterval, (_) {
+      if (_intentionalDisconnect) return;
+      final gap = DateTime.now().difference(_lastActivity);
+      if (gap > _deadSocketThreshold) {
+        // Socket is silently dead — force-reconnect
+        _watchdogTimer?.cancel();
+        _subscription?.cancel();
+        _channel?.sink.close();
+        _channel = null;
+        _setState(WsConnectionState.disconnected);
+        _scheduleReconnect();
+      }
+    });
+  }
+
   void dispose() {
     disconnect();
+    _watchdogTimer?.cancel();
     _eventController.close();
     _connectionController.close();
   }
