@@ -48,6 +48,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _suppressTextUpdate = false;
   Timer? _textUpdateDebounce;
 
+  // Set to true when THIS client sends the start command.
+  // Only the initiating device adds the visual separator to avoid doubles.
+  bool _isInitiatingRecording = false;
+
   @override
   void initState() {
     super.initState();
@@ -147,15 +151,17 @@ class _HomeScreenState extends State<HomeScreen> {
         case 'status':
           if (event.status == 'started') {
             _isRecording = true;
-            // Insert separator if there's existing text, then mark where this
-            // session begins so partials and the final can update in-place.
-            if (_rawController.text.isNotEmpty) {
+            // Only the device that INITIATED the recording adds the separator.
+            // The other device just tracks the offset and receives the separator
+            // via text_update after the session ends.
+            if (_isInitiatingRecording && _rawController.text.isNotEmpty) {
               _rawController.text = '${_rawController.text}\n\n─────────────────────\n\n';
               _rawController.selection = TextSelection.collapsed(
                 offset: _rawController.text.length,
               );
               if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
             }
+            _isInitiatingRecording = false; // consumed
             _sessionStartOffset = _rawController.text.length;
           }
           if (event.status == 'stopped') {
@@ -306,6 +312,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (wasRecording) {
         await _api.stopStream();
       } else {
+        _isInitiatingRecording = true; // this client is starting — add separator
         await _api.startStream();
       }
     } catch (e) {

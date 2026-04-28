@@ -58,6 +58,10 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   bool _suppressTextUpdate = false;
   Timer? _textUpdateDebounce;
 
+  // Set to true when THIS client sends the start command.
+  // Only the initiating device adds the visual separator to avoid doubles.
+  bool _isInitiatingRecording = false;
+
   // Page controller for swipe between Raw / Formatted
   final PageController _pageCtrl = PageController();
   int _currentPage = 0;
@@ -192,11 +196,12 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
         case 'status':
           if (event.status == 'started') {
             _isRecording = true;
-            if (_rawController.text.isNotEmpty) {
+            if (_isInitiatingRecording && _rawController.text.isNotEmpty) {
               _rawController.text = '${_rawController.text}\n\n─────────────────────\n\n';
               _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
               if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
             }
+            _isInitiatingRecording = false; // consumed
             _sessionStartOffset = _rawController.text.length;
           }
           if (event.status == 'stopped') {
@@ -239,6 +244,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
       setState(() { _isRecording = false; _isTranscribing = true; });
       await _mic.stop();
     } else {
+      _isInitiatingRecording = true; // this phone is starting — add separator
       final started = await _mic.start();
       if (!started && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
