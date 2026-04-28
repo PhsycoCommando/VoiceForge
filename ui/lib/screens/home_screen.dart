@@ -459,24 +459,23 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(width: 16),
         StatusIndicator(state: _appStatus),
         const SizedBox(width: 16),
-        Container(
-          width: 1,
-          height: 24,
-          color: Colors.white.withValues(alpha: 0.1),
-        ),
+        Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.1)),
         const SizedBox(width: 12),
-        MicSelector(api: _api),
-        const SizedBox(width: 12),
-        Container(
-          width: 1,
-          height: 24,
-          color: Colors.white.withValues(alpha: 0.1),
-        ),
-        const SizedBox(width: 12),
-        // ── File transcribe ──────────────────────────────────────────────────
-        FileTranscribeButton(
-          api: _api,
-          onTranscribed: _onFileTranscribed,
+        // Mic selector + file button wrapped so they can shrink at narrow widths
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MicSelector(api: _api),
+              const SizedBox(width: 12),
+              Container(width: 1, height: 24, color: Colors.white.withValues(alpha: 0.1)),
+              const SizedBox(width: 12),
+              FileTranscribeButton(
+                api: _api,
+                onTranscribed: _onFileTranscribed,
+              ),
+            ],
+          ),
         ),
         const Spacer(),
         TextButton.icon(
