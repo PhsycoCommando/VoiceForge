@@ -43,7 +43,20 @@ void main() async {
 
   // Enforce single instance then launch backend.
   if (!await _acquireInstanceLock()) {
-    exit(0);
+    // A stale/zombie process may be holding the lock.
+    // Kill any lingering VoiceForge/voice_forge_ui processes and retry once.
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'VoiceForge.exe']);
+    } catch (_) {}
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'voice_forge_ui.exe']);
+    } catch (_) {}
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (!await _acquireInstanceLock()) {
+      // Still can't get the lock — truly another instance running.
+      exit(0);
+    }
   }
 
   await BackendService.instance.launch();
