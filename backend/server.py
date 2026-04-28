@@ -1081,11 +1081,23 @@ async def websocket_stream(websocket: WebSocket):
     sub_id, queue = event_bus.subscribe()
     print(f"WebSocket client connected (id={sub_id}, total={event_bus.subscriber_count})")
 
+    # -- Safe sender: prevents dead-socket hangs from freezing the event loop --
+    async def safe_send(data: dict, timeout: float = 10.0) -> bool:
+        """Send JSON to the WebSocket with a timeout. Returns False on failure."""
+        try:
+            await asyncio.wait_for(websocket.send_json(data), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            print(f"[WS] Send timed out for client {sub_id} — dropping")
+            return False
+        except Exception:
+            return False
+
     # Send handshake — Flutter waits for this before marking connected.
     # Include current session_text AND formatted_output so any reconnecting
     # client (desktop joining an active mobile session, or vice versa)
     # immediately restores both panels without needing to re-run a transform.
-    await websocket.send_json({
+    if not await safe_send({
         "type": "status",
         "status": "connected",
         "pipeline_running": pipeline.is_running or phone_pipeline.is_running,
@@ -1094,20 +1106,16 @@ async def websocket_stream(websocket: WebSocket):
         "session_text": pipeline.session_text,
         "formatted_output": pipeline.formatted_output,
         "formatted_mode":   pipeline.formatted_mode,
-    })
+    }):
+        event_bus.unsubscribe(sub_id)
+        return
 
     async def send_events():
         """Forward events from the bus to the WebSocket client."""
         try:
             while True:
                 event = await queue.get()
-                try:
-                    await asyncio.wait_for(
-                        websocket.send_json(event),
-                        timeout=10.0,
-                    )
-                except asyncio.TimeoutError:
-                    print(f"[WS] Send timed out for client {sub_id} — dropping")
+                if not await safe_send(event):
                     return
         except (WebSocketDisconnect, RuntimeError):
             pass
@@ -1181,13 +1189,13 @@ async def websocket_stream(websocket: WebSocket):
                     mode = data.get("mode", "clean")
                     try:
                         pipeline.set_mode(mode)
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "status",
                             "status": "mode_changed",
                             "mode": mode,
                         })
                     except ValueError as e:
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "error",
                             "message": str(e),
                         })
@@ -1196,12 +1204,12 @@ async def websocket_stream(websocket: WebSocket):
                     source = data.get("source", "wasapi")
                     if source == "phone":
                         if pipeline.is_running:
-                            await websocket.send_json({
+                            await safe_send({
                                 "type": "error",
                                 "message": "PC mic is already recording",
                             })
                         elif phone_pipeline.is_running:
-                            await websocket.send_json({
+                            await safe_send({
                                 "type": "error",
                                 "message": "Phone recording already in progress",
                             })
@@ -1210,13 +1218,13 @@ async def websocket_stream(websocket: WebSocket):
                             # status: started is published by phone_pipeline._run
                     else:  # wasapi (desktop)
                         if phone_pipeline.is_running:
-                            await websocket.send_json({
+                            await safe_send({
                                 "type": "error",
                                 "message": "Phone mic is already recording",
                             })
                         elif not pipeline.is_running:
                             pipeline.start()
-                            await websocket.send_json({
+                            await safe_send({
                                 "type": "status",
                                 "status": "started",
                             })
@@ -1227,7 +1235,7 @@ async def websocket_stream(websocket: WebSocket):
                         await loop.run_in_executor(None, phone_pipeline.stop)
                     elif pipeline.is_running:
                         await loop.run_in_executor(None, pipeline.stop)
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "status",
                             "status": "stopped",
                         })
@@ -1240,13 +1248,7 @@ async def websocket_stream(websocket: WebSocket):
         try:
             while True:
                 await asyncio.sleep(20)
-                try:
-                    await asyncio.wait_for(
-                        websocket.send_json({"type": "ping"}),
-                        timeout=5.0,
-                    )
-                except asyncio.TimeoutError:
-                    print(f"[WS] Keepalive timed out for client {sub_id} — dropping")
+                if not await safe_send({"type": "ping"}, timeout=5.0):
                     return
         except Exception:
             pass
