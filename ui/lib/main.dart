@@ -3,9 +3,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
-import 'screens/mobile_home_screen.dart';
 import 'services/backend_service.dart';
-import 'services/host_config.dart';
 
 // ─── Single-instance lock via ServerSocket port bind ─────────────────────────
 // Bind port 47832 exclusively. A second instance cannot bind the same port
@@ -42,16 +40,8 @@ void _releaseInstanceLock() {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await HostConfig.load();
 
-  // Mobile: skip single-instance lock and local backend launch.
-  // The app connects to a remote backend via Tailscale.
-  if (Platform.isAndroid || Platform.isIOS) {
-    runApp(const VoiceForgeApp());
-    return;
-  }
-
-  // Desktop: enforce single instance then launch backend.
+  // Enforce single instance then launch backend.
   if (!await _acquireInstanceLock()) {
     exit(0);
   }
@@ -112,9 +102,7 @@ class _VoiceForgeAppState extends State<VoiceForgeApp> {
           ),
         ),
       ),
-      home: Platform.isAndroid || Platform.isIOS
-          ? const MobileHomeScreen()
-          : const HomeScreen(),
+      home: const HomeScreen(),
     );
   }
 }

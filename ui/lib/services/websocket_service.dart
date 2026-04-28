@@ -6,7 +6,6 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// A single transcription event from the backend.
@@ -158,10 +157,7 @@ class WebSocketService {
     _channel!.sink.add(jsonEncode(msg));
   }
 
-  /// Send raw binary data (PCM audio frames from phone mic).
-  void sendBinary(Uint8List bytes) {
-    _channel?.sink.add(bytes);
-  }
+
 
   /// Send a raw text edit to sync with other clients.
   void sendTextUpdate(String text) =>
