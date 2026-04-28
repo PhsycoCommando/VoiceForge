@@ -1,0 +1,10 @@
+{
+    "model_size": "small",
+    "compute_type": "int8",
+    "device": "cpu",
+    "signal_boost": 1.5,
+    "silence_threshold": 0.003,
+    "speech_threshold": 0.012,
+    "silence_limit": 30,
+    "partial_interval": 30
+}

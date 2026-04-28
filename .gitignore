@@ -1,4 +1,4 @@
-# AI Agent Folders
+# AI Agent workspace folders
 .tmp/
 .agents/
 .dev_notes/
@@ -7,10 +7,12 @@ token.json
 execution/
 directives/
 skills/
-.env
 GEMINI.md
 CLAUDE.md
 AGENTS.md
+
+# Secrets
+.env
 
 # Python
 venv/
@@ -18,8 +20,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
-dist/
-build/
 *.egg
 
 # Logs
@@ -41,20 +41,19 @@ ui/.idea/
 .DS_Store
 Thumbs.db
 
-# Windows builds
+# Windows builds / packaging
 *.exe
 *.dll
+*.zip
 data/
+
+# Backend — ignore venv and compiled output, track Python source
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
 backend/_internal/
 
-# PyInstaller
-dist/
-build/
-
-# Flutter build junk
-ui/build/
-
-# Misc
-*.log
-backend/
-*.zip
+# PyInstaller release build (compiled binaries — too large for git)
+release/backend/_internal/
+release/backend/backend/
