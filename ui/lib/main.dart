@@ -81,16 +81,29 @@ Future<void> _launchBackend() async {
   dbg('Platform.resolvedExecutable: ${Platform.resolvedExecutable}');
   dbg('Directory.current: ${Directory.current.path}');
 
-  // Check if backend is already running on port 8000
+  // Check if backend is already running on port 8000.
+  // Wrap in a hard 3-second timeout: if the backend accepts the TCP connection
+  // but never sends an HTTP response (e.g. still loading Whisper), the app
+  // would hang here indefinitely and the window would never appear.
   try {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 1);
-    final request = await client.getUrl(Uri.parse('http://localhost:8000/'));
-    final response = await request.close();
-    client.close();
-    if (response.statusCode == 200) {
+    final statusCode = await Future(() async {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      try {
+        final request = await client.getUrl(Uri.parse('http://localhost:8000/'));
+        final response = await request.close();
+        await response.drain<void>();
+        client.close();
+        return response.statusCode;
+      } finally {
+        client.close();
+      }
+    }).timeout(const Duration(seconds: 3), onTimeout: () => -1);
+
+    if (statusCode == 200) {
       dbg('Backend already running — reusing.');
       return;
     }
+    dbg('Backend responded with status $statusCode — will try to respawn.');
   } catch (e) {
     dbg('Backend not running: $e');
   }
@@ -171,9 +184,11 @@ Future<void> _launchBackend() async {
     return;
   }
 
-  // Wait for backend to initialize before UI tries to connect
-  await Future.delayed(const Duration(seconds: 3));
-  dbg('_launchBackend DONE — waiting complete.');
+  // Give the backend just enough time to bind the port.
+  // The WS service's reconnect loop handles the rest — no need to block here
+  // for the full 30-60s Whisper load time.
+  await Future.delayed(const Duration(seconds: 1));
+  dbg('_launchBackend DONE — UI will launch now, WS will retry until backend ready.');
 }
 
 /// Kills the backend process if we spawned it.

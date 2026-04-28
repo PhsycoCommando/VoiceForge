@@ -76,6 +76,11 @@ class WebSocketService {
   /// Clients use this to restore the raw panel on connect.
   String sessionText = '';
 
+  /// Latest formatted output + mode from the last handshake or formatted event.
+  /// Clients use this to restore the formatted panel on connect.
+  String formattedOutput = '';
+  String formattedMode   = '';
+
   // Watchdog: track last server message time to detect silent socket drops.
   DateTime _lastActivity = DateTime.now();
   Timer? _watchdogTimer;
@@ -196,6 +201,11 @@ class WebSocketService {
         if (data.containsKey('session_text')) {
           sessionText = data['session_text'] as String? ?? '';
         }
+        // Restore formatted output so the formatted panel is also populated
+        if (data.containsKey('formatted_output')) {
+          formattedOutput = data['formatted_output'] as String? ?? '';
+          formattedMode   = data['formatted_mode']   as String? ?? '';
+        }
         _setState(WsConnectionState.connected);
       }
 
@@ -208,6 +218,12 @@ class WebSocketService {
       // Track latest session text from text_update events
       if (event.type == 'text_update') {
         sessionText = event.raw;
+      }
+
+      // Track latest formatted output from formatted events
+      if (event.type == 'formatted') {
+        formattedOutput = event.formatted;
+        formattedMode   = event.mode;
       }
 
       _eventController.add(event);

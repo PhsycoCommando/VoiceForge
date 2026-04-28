@@ -259,6 +259,22 @@ class PipelineManager:
         with self._lock:
             self._paragraphs = [text] if text.strip() else []
 
+    def set_formatted_output(self, mode: str, formatted: str):
+        """Store the latest formatted result so reconnecting clients can restore it."""
+        with self._lock:
+            self._formatted_output = formatted
+            self._formatted_mode   = mode
+
+    @property
+    def formatted_output(self) -> str:
+        with self._lock:
+            return getattr(self, '_formatted_output', '')
+
+    @property
+    def formatted_mode(self) -> str:
+        with self._lock:
+            return getattr(self, '_formatted_mode', '')
+
     def start(self):
         """Start the background pipeline thread. No-op if already running."""
         with self._lock:
@@ -810,7 +826,9 @@ async def transform_text(req: TransformRequest):
     try:
         fmt = Formatter(mode=req.mode)
         formatted = fmt.format(req.text)
-        # Persist every formatted output
+        # Persist formatted output so reconnecting clients can restore it.
+        pipeline.set_formatted_output(req.mode, formatted)
+        # Persist every formatted output to the session archive
         session_mgr.save_formatted(req.mode, formatted)
         # Broadcast so desktop/phone both update their formatted panel
         event_bus.publish({
@@ -1064,7 +1082,9 @@ async def websocket_stream(websocket: WebSocket):
     print(f"WebSocket client connected (id={sub_id}, total={event_bus.subscriber_count})")
 
     # Send handshake — Flutter waits for this before marking connected.
-    # Include current session_text so reconnecting clients restore their panel.
+    # Include current session_text AND formatted_output so any reconnecting
+    # client (desktop joining an active mobile session, or vice versa)
+    # immediately restores both panels without needing to re-run a transform.
     await websocket.send_json({
         "type": "status",
         "status": "connected",
@@ -1072,6 +1092,8 @@ async def websocket_stream(websocket: WebSocket):
         "current_mode": pipeline.mode,
         "available_modes": Formatter.available_modes(),
         "session_text": pipeline.session_text,
+        "formatted_output": pipeline.formatted_output,
+        "formatted_mode":   pipeline.formatted_mode,
     })
 
     async def send_events():

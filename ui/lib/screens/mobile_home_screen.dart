@@ -159,6 +159,15 @@ class _MobileHomeScreenState extends State<MobileHomeScreen>
           _suppressTextUpdate = false;
           setState(() {});
         }
+        // Restore formatted panel from backend handshake
+        if (_ws.formattedOutput.isNotEmpty && _fmtController.text.isEmpty) {
+          setState(() {
+            _suppressFmtUpdate = true;
+            _fmtController.text = _ws.formattedOutput;
+            _suppressFmtUpdate = false;
+            if (_ws.formattedMode.isNotEmpty) _currentMode = _ws.formattedMode;
+          });
+        }
       }
     });
     _eventSub = _ws.events.listen(_handleEvent);

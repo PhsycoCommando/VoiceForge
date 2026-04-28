@@ -94,6 +94,15 @@ class _HomeScreenState extends State<HomeScreen> {
             _suppressTextUpdate = false;
           });
         }
+        // Restore formatted panel if backend has a prior result (mobile-first scenario)
+        if (_ws.formattedOutput.isNotEmpty && _fmtController.text.isEmpty) {
+          setState(() {
+            _suppressFmtUpdate = true;
+            _fmtController.text = _ws.formattedOutput;
+            _suppressFmtUpdate = false;
+            if (_ws.formattedMode.isNotEmpty) _currentMode = _ws.formattedMode;
+          });
+        }
       }
     });
 
