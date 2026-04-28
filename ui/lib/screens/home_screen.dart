@@ -52,6 +52,11 @@ class _HomeScreenState extends State<HomeScreen> {
   // Only the initiating device adds the visual separator to avoid doubles.
   bool _isInitiatingRecording = false;
 
+  // True when this client started the current session.
+  // Non-initiating device blocks its post-session debounce to avoid
+  // overwriting the initiating device's text (which includes the separator).
+  bool _sessionIsLocal = true;
+
   @override
   void initState() {
     super.initState();
@@ -91,6 +96,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onRawTextChanged() {
     if (_suppressTextUpdate) return;
     if (_isRecording || _isTranscribing) return;
+    // Non-initiating device: don't debounce — our text lacks the separator.
+    // We'll get the authoritative text via text_update from the other device.
+    if (!_sessionIsLocal) return;
     _textUpdateDebounce?.cancel();
     _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
       _ws.sendTextUpdate(_rawController.text);
@@ -151,9 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
         case 'status':
           if (event.status == 'started') {
             _isRecording = true;
-            // Only the device that INITIATED the recording adds the separator.
-            // The other device just tracks the offset and receives the separator
-            // via text_update after the session ends.
+            _sessionIsLocal = _isInitiatingRecording;
             if (_isInitiatingRecording && _rawController.text.isNotEmpty) {
               _rawController.text = '${_rawController.text}\n\n─────────────────────\n\n';
               _rawController.selection = TextSelection.collapsed(
@@ -161,21 +167,29 @@ class _HomeScreenState extends State<HomeScreen> {
               );
               if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
             }
-            _isInitiatingRecording = false; // consumed
+            _isInitiatingRecording = false;
             _sessionStartOffset = _rawController.text.length;
           }
           if (event.status == 'stopped') {
             _isRecording = false;
-            _isTranscribing = false; // clear if final never came (empty recording)
+            _isTranscribing = false;
+            // Safety: restore edit rights on non-initiating device after 2s
+            // in case the authoritative text_update never arrives.
+            if (!_sessionIsLocal) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) setState(() => _sessionIsLocal = true);
+              });
+            }
           }
           if (event.status == 'cleared') {
-            // Another client cleared the session
+            _textUpdateDebounce?.cancel();
             _suppressTextUpdate = true;
             _rawController.clear();
             _suppressTextUpdate = false;
             _formattedOutput = '';
             _liveText = '';
             _sessionStartOffset = 0;
+            _sessionIsLocal = true;
           }
           if (event.status == 'mode_changed') {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
@@ -193,14 +207,15 @@ class _HomeScreenState extends State<HomeScreen> {
           break;
 
         case 'text_update':
-          // Another client (phone or second desktop) edited the raw panel.
-          // Apply without triggering our own debounce echo.
+          // Cancel any pending stale debounce before applying authoritative text.
+          _textUpdateDebounce?.cancel();
           _suppressTextUpdate = true;
           _rawController.text = event.raw;
           _rawController.selection = TextSelection.collapsed(
             offset: _rawController.text.length,
           );
           _suppressTextUpdate = false;
+          _sessionIsLocal = true; // received authoritative text — edits can sync again
           break;
       }
     });
@@ -323,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _clearTranscript() {
+    _textUpdateDebounce?.cancel(); // prevent stale debounce from restoring text
     setState(() {
       _suppressTextUpdate = true;
       _rawController.clear();
@@ -330,8 +346,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _formattedOutput = '';
       _liveText = '';
       _sessionStartOffset = 0;
+      _sessionIsLocal = true;
     });
-    // Broadcast clear to all connected clients via WebSocket
     _ws.sendClear();
   }
 

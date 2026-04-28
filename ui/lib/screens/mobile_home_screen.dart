@@ -62,6 +62,9 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   // Only the initiating device adds the visual separator to avoid doubles.
   bool _isInitiatingRecording = false;
 
+  // True when this client started the current session.
+  bool _sessionIsLocal = true;
+
   // Page controller for swipe between Raw / Formatted
   final PageController _pageCtrl = PageController();
   int _currentPage = 0;
@@ -106,6 +109,7 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   void _onRawTextChanged() {
     if (_suppressTextUpdate) return;
     if (_isRecording || _isTranscribing) return;
+    if (!_sessionIsLocal) return;
     _textUpdateDebounce?.cancel();
     _textUpdateDebounce = Timer(const Duration(milliseconds: 500), () {
       _ws.sendTextUpdate(_rawController.text);
@@ -196,24 +200,32 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
         case 'status':
           if (event.status == 'started') {
             _isRecording = true;
+            _sessionIsLocal = _isInitiatingRecording;
             if (_isInitiatingRecording && _rawController.text.isNotEmpty) {
               _rawController.text = '${_rawController.text}\n\n─────────────────────\n\n';
               _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
               if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
             }
-            _isInitiatingRecording = false; // consumed
+            _isInitiatingRecording = false;
             _sessionStartOffset = _rawController.text.length;
           }
           if (event.status == 'stopped') {
             _isRecording    = false;
             _isTranscribing = false;
+            if (!_sessionIsLocal) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) setState(() => _sessionIsLocal = true);
+              });
+            }
           }
           if (event.status == 'cleared') {
+            _textUpdateDebounce?.cancel();
             _suppressTextUpdate = true;
             _rawController.clear();
             _suppressTextUpdate = false;
             _formattedOutput    = '';
             _sessionStartOffset = 0;
+            _sessionIsLocal = true;
           }
           if (event.status == 'mode_changed') {
             _currentMode = event.mode.isNotEmpty ? event.mode : _currentMode;
@@ -228,10 +240,12 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           );
 
         case 'text_update':
+          _textUpdateDebounce?.cancel();
           _suppressTextUpdate = true;
           _rawController.text = event.raw;
           _rawController.selection = TextSelection.collapsed(offset: _rawController.text.length);
           _suppressTextUpdate = false;
+          _sessionIsLocal = true;
           if (_shouldAutoScrollRaw) _scrollToBottom(_rawScroll);
       }
     });
@@ -380,12 +394,14 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () {
+              _textUpdateDebounce?.cancel();
               setState(() {
                 _suppressTextUpdate = true;
                 _rawController.text = '';
                 _suppressTextUpdate = false;
                 _formattedOutput    = '';
                 _sessionStartOffset = 0;
+                _sessionIsLocal = true;
               });
               _ws.sendClear();
             },
