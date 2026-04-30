@@ -425,25 +425,42 @@ class PipelineManager:
 
             stop_recording()
 
-            # ── Final high-quality transcription ─────────────────────────
+            # ── Fast tail flush — only transcribe what the partial worker missed ──
             if all_chunks:
-                try:
-                    audio = _prepare_audio(all_chunks, native_sr)
-                    text  = transcribe(audio)
-                    if text:
-                        # Persist WAV for this recording
+                final_text = partial_text
+
+                # Transcribe any un-processed tail audio (after last partial cursor)
+                tail_chunks = all_chunks[partial_cursor:]
+                if len(tail_chunks) >= MIN_CHUNKS_FOR_PARTIAL:
+                    try:
+                        tail_audio = _prepare_audio(tail_chunks, native_sr)
+                        tail_text = transcribe_partial(tail_audio)
+                        if tail_text:
+                            final_text = (final_text + " " + tail_text).strip()
+                    except Exception as e:
+                        print(f"[Final tail] {e}")
+
+                if final_text:
+                    with self._lock:
+                        self._paragraphs = [final_text]
+                    event_bus.publish({
+                        "type": "final",
+                        "raw": final_text,
+                        "formatted": final_text,
+                        "mode": self._mode,
+                        "timestamp": time.time(),
+                    })
+
+                # Save WAV async — don't block the UI
+                _chunks_copy = list(all_chunks)
+                _sr = native_sr
+                def _save_wav():
+                    try:
+                        audio = _prepare_audio(_chunks_copy, _sr)
                         session_mgr.save_audio(audio, source="wasapi")
-                        with self._lock:
-                            self._paragraphs = [text]
-                        event_bus.publish({
-                            "type": "final",
-                            "raw": text,
-                            "formatted": text,
-                            "mode": self._mode,
-                            "timestamp": time.time(),
-                        })
-                except Exception as e:
-                    event_bus.publish({"type": "error", "message": f"Transcription failed: {e}"})
+                    except Exception as e:
+                        print(f"[WAV save] {e}")
+                threading.Thread(target=_save_wav, daemon=True).start()
 
             with self._lock:
                 self._running = False
@@ -602,29 +619,48 @@ class PhoneAudioPipeline:
         partial_stop.set()
         t.join(timeout=10.0)
 
-        # Final high-quality pass over all accumulated phone audio
+        # Fast tail flush — use accumulated partial text + un-processed tail
         all_chunks = list(self._all_chunks)
         if all_chunks:
-            try:
-                audio = np.concatenate(all_chunks).astype(np.float32)
-                max_val = np.max(np.abs(audio))
-                if max_val > 0:
-                    audio = audio / max_val
-                audio = audio * cfg.signal_boost
-                text  = transcribe(audio)
-                if text:
-                    # Persist WAV for this phone recording
+            final_text = partial_text
+
+            # Transcribe any un-processed tail audio
+            tail_chunks = all_chunks[partial_cursor:]
+            if len(tail_chunks) >= self.MIN_CHUNKS_FOR_PARTIAL:
+                try:
+                    tail_audio = np.concatenate(tail_chunks).astype(np.float32)
+                    max_val = np.max(np.abs(tail_audio))
+                    if max_val > 0:
+                        tail_audio = tail_audio / max_val
+                    tail_audio = tail_audio * cfg.signal_boost
+                    tail_text = transcribe_partial(tail_audio)
+                    if tail_text:
+                        final_text = (final_text + " " + tail_text).strip()
+                except Exception as e:
+                    print(f"[Phone tail] {e}")
+
+            if final_text:
+                pipeline.set_session_text(final_text)
+                event_bus.publish({
+                    "type": "final",
+                    "raw": final_text,
+                    "formatted": final_text,
+                    "mode": pipeline.mode,
+                    "timestamp": time.time(),
+                })
+
+            # Save WAV async
+            def _save_phone_wav():
+                try:
+                    audio = np.concatenate(all_chunks).astype(np.float32)
+                    max_val = np.max(np.abs(audio))
+                    if max_val > 0:
+                        audio = audio / max_val
+                    audio = audio * cfg.signal_boost
                     session_mgr.save_audio(audio, source="phone")
-                    pipeline.set_session_text(text)
-                    event_bus.publish({
-                        "type": "final",
-                        "raw": text,
-                        "formatted": text,
-                        "mode": pipeline.mode,
-                        "timestamp": time.time(),
-                    })
-            except Exception as e:
-                event_bus.publish({"type": "error", "message": f"Phone transcription failed: {e}"})
+                except Exception as e:
+                    print(f"[Phone WAV save] {e}")
+            threading.Thread(target=_save_phone_wav, daemon=True).start()
 
         with self._lock:
             self._running = False
