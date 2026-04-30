@@ -18,7 +18,6 @@ class ModeSelector extends StatelessWidget {
   });
 
   static const _modeIcons = <String, IconData>{
-    'raw': Icons.text_snippet_rounded,
     'clean': Icons.auto_fix_high_rounded,
     'bullet': Icons.format_list_bulleted_rounded,
     'summary': Icons.summarize_rounded,
@@ -32,7 +31,6 @@ class ModeSelector extends StatelessWidget {
   };
 
   static const _modeLabels = <String, String>{
-    'raw': 'Raw',
     'clean': 'Clean',
     'bullet': 'Bullet',
     'summary': 'Summary',

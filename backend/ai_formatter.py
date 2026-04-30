@@ -160,6 +160,26 @@ Raw transcript:
 """
 
 
+AI_MARKDOWN_PROMPT = """You are a markdown formatter. Convert the following spoken transcript into clean, well-structured raw Markdown.
+
+Rules:
+- Output raw Markdown syntax — the user will paste this into a .md file
+- Use ## headers to separate major topics or sections
+- Use - bullet points for lists of items, steps, or action items
+- Use **bold** for key terms, names, or emphasis the speaker used
+- Use paragraphs (separated by blank lines) for narrative/explanatory content
+- Remove filler words (um, uh, like, you know, basically)
+- Fix grammar and punctuation
+- Do NOT add content that wasn't in the original
+- Do NOT use code blocks or HTML — pure Markdown only
+- Do NOT include any preamble or explanation — output ONLY the Markdown
+- Keep it concise but preserve all the speaker's ideas
+
+Text:
+"{input}"
+"""
+
+
 def _clean_response(result: str) -> str:
     """Strip <think>...</think> blocks from reasoning models."""
     return re.sub(r'<think>.*?</think>', '', result, flags=re.DOTALL).strip()
@@ -326,6 +346,42 @@ def ai_format_speech(text: str) -> str:
     return fallback.format(text)
 
 
+def ai_format_markdown(text: str) -> str:
+    """
+    Convert spoken text into structured raw Markdown via AI.
+
+    Uses gemma3:4b by default for fast, lightweight processing.
+    Falls back to rule-based markdown formatter if AI is unavailable.
+
+    Args:
+        text: raw transcription
+
+    Returns:
+        str — raw Markdown source ready to paste into .md files
+    """
+    model = cfg.get_model_for("markdown")
+
+    if _client.is_available():
+        print(f"🤖 Using model: {model} for markdown")
+        prompt = AI_MARKDOWN_PROMPT.format(input=text)
+        result = _client.generate(prompt, model=model)
+
+        if result:
+            result = _clean_response(result)
+            if result:
+                return result
+
+    # Fallback to rule-based markdown
+    from formatter import Formatter
+    fallback = Formatter(mode="_markdown_rule")
+    try:
+        return fallback.format(text)
+    except ValueError:
+        # _markdown_rule not registered — use clean
+        fallback = Formatter(mode="clean")
+        return fallback.format(text)
+
+
 # ==============================================================================
 # REGISTER MODES
 # ==============================================================================
@@ -340,6 +396,8 @@ def register_ai_modes():
         - "ai_summary" — AI-cleaned summary
         - "summary"    — Alias for ai_summary (user-friendly name)
         - "prompt"     — Convert speech into structured AI prompts
+        - "speech"     — Refine speech for delivery
+        - "markdown"   — AI-powered raw Markdown formatting
     """
     from formatter import Formatter
 
@@ -362,6 +420,16 @@ def register_ai_modes():
     @Formatter.register("speech")
     def _speech(text):
         return ai_format_speech(text)
+
+    # Override rule-based markdown with AI-powered version.
+    # The rule-based version is preserved as '_markdown_rule' for fallback.
+    from formatter import Formatter as _Fmt
+    if "markdown" in _Fmt._registry:
+        _Fmt._registry["_markdown_rule"] = _Fmt._registry["markdown"]
+
+    @Formatter.register("markdown")
+    def _markdown(text):
+        return ai_format_markdown(text)
 
     # Log availability and model routing
     if _client.is_available():

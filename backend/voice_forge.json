@@ -6,5 +6,8 @@
     "silence_threshold": 0.003,
     "speech_threshold": 0.012,
     "silence_limit": 30,
-    "partial_interval": 30
+    "partial_interval": 30,
+    "ollama_models": {
+        "markdown": "gemma3:4b"
+    }
 }

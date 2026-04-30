@@ -23,7 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _ws = WebSocketService();
 
   // Modes shown in the UI (filtered from backend)
-  static const _visibleModes = ['raw', 'clean', 'bullet', 'summary', 'prompt', 'markdown', 'speech'];
+  static const _visibleModes = ['clean', 'bullet', 'summary', 'prompt', 'markdown', 'speech'];
 
   // State
   bool _isRecording = false;
@@ -439,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       final existing = _rawController.text;
       final prefix = existing.isEmpty ? '' : '\n\n';
-      _rawController.text = '$existing${prefix}$rawText';
+      _rawController.text = '$existing$prefix$rawText';
       _rawController.selection = TextSelection.collapsed(
         offset: _rawController.text.length,
       );

@@ -134,9 +134,29 @@ def _format_clean(text):
       - Fixes casing after sentence boundaries
       - Smooths double punctuation / whitespace
       - Preserves meaning — NO rewording
+      - Breaks text into paragraphs using session separators AND sentence count
 
     This should feel like a human lightly edited the transcript.
     """
+    # Split on session separator lines (────) first
+    separator_pattern = r'\n*─{4,}\n*'
+    sections = re.split(separator_pattern, text)
+
+    cleaned_sections = []
+    for section in sections:
+        cleaned = _clean_section(section.strip())
+        if cleaned:
+            cleaned_sections.append(cleaned)
+
+    return "\n\n".join(cleaned_sections)
+
+
+def _clean_section(text):
+    """Clean a single section of text between separators, adding paragraph
+    breaks when the section is long enough (> 3 sentences)."""
+    if not text or not text.strip():
+        return ""
+
     # Remove common filler words (whole words only)
     filler_pattern = r'\b(?:um+|uh+|erm|hmm+|like,?\s|you know,?\s|I mean,?\s|basically,?\s|okay so,?\s|so basically,?\s|right so,?\s)\b'
     text = re.sub(filler_pattern, '', text, flags=re.IGNORECASE)
@@ -174,7 +194,22 @@ def _format_clean(text):
     # Final whitespace cleanup
     text = re.sub(r'\s+', ' ', text).strip()
 
-    return text
+    # --- Paragraph breaks based on sentence count ---
+    # Split into sentences and group into paragraphs of ~3 sentences
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) <= 3:
+        # Short section — keep as a single paragraph
+        return ' '.join(sentences)
+
+    # Group into paragraphs of 3 sentences each
+    paragraphs = []
+    for i in range(0, len(sentences), 3):
+        chunk = sentences[i:i + 3]
+        paragraphs.append(' '.join(chunk))
+
+    return '\n\n'.join(paragraphs)
 
 
 @Formatter.register("bullet")
