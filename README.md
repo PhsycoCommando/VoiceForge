@@ -1,55 +1,12 @@
 # 🚀 VoiceForge
 
-🚀 **Latest Release: [v0.1.1](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v0.1.1)**
+🚀 **Latest Release: [v1.3.0](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v1.3.0)**
 
-**Local AI Voice Transcription + Prompt Engine**
+**Local AI Voice Transcription + Formatting Engine**
 
 VoiceForge is a real-time voice-to-text system designed for developers, creators, and thinkers who want to capture ideas instantly — and structure them later using local AI.
 
----
-
-## 🪟 Windows (One-Click Version) 🔥 NEW
-
-> Built 4/16/2026 — ~20 hours over 2 days
-
-No setup. No Python. No dependencies.  
-Just **download → extract → run.**
-
----
-
-### 🔽 Download
-
-👉 Go to **Releases** and download:
-
-`VoiceForge_Windows_v1.zip`
-
----
-
-### ▶️ Run
-
-1. Extract the ZIP anywhere
-2. Double-click:
-
-`VoiceForge.exe`
-
-3. Done. 🎤
-
----
-
-### ⚙️ What Happens Automatically
-
-- Backend server auto-launches
-- Microphone initializes (WASAPI)
-- UI connects instantly
-- Ready for recording
-
----
-
-### ⚠️ Notes
-
-- First launch may take a few seconds (backend spin-up)
-- Ensure your microphone works in Windows
-- Voicemeeter users: select the correct device in the dropdown (top bar)
+> Free & open source — pay what you want on [Ko-fi](https://ko-fi.com/phsyco)
 
 ---
 
@@ -57,181 +14,164 @@ Just **download → extract → run.**
 
 > Speak freely → Capture raw → Transform later
 
-VoiceForge treats your raw input as the source of truth, then lets you refine it into structured outputs using local models via Ollama.
+VoiceForge treats your raw input as the source of truth, then lets you refine it into structured outputs using local AI models via [Ollama](https://ollama.com).
+
+---
 
 ## ✨ Features
 
-* 🎤 Real-time voice transcription (push-to-talk)
-* 📝 Editable RAW input (type, paste, or speak)
-* ⚡ Dual-panel UI (Raw → Processed)
-* 🧠 Local AI transformations (Ollama)
-* 🔄 Reprocess pipeline (iterate instantly)
-* 📄 Paragraph-aware transcription
-* 📋 Copy-ready outputs
+- 🎤 Real-time voice transcription with live preview
+- 📝 Dual-panel UI — editable raw transcript + formatted output
+- 🧠 Local AI transformations (Ollama) — no cloud, no API keys
+- ⚡ Near-instant stop — fast tail-flush architecture
+- 📂 Session history with folder access
+- 🔄 Reprocess pipeline — iterate and refine instantly
+- 📋 Copy-ready outputs for all modes
+
+---
 
 ## 🧩 Output Modes
 
-Transform your input into:
+| Mode | What It Does | Engine |
+|---|---|---|
+| **Clean** | Removes filler words, fixes punctuation, adds paragraphs | Rule-based |
+| **Bullet** | Converts speech into structured bullet points | Rule-based |
+| **Markdown** | Raw `.md` syntax — headers, bullets, bold | AI (gemma3:4b) |
+| **Summary** | Concise overview of your speech | AI (mistral:7b) |
+| **Prompt** | Converts speech into structured AI prompts | AI (mistral:7b) |
+| **Speech** | Polishes speech for delivery — keeps your voice | AI (mistral:7b) |
 
-* **Clean** → Proper sentences & paragraphs
-* **Bullet** → Structured key points
-* **Summary** → Condensed overview
-* **Prompt** → AI-ready structured prompt
-
-## 🚀 Quick Start
-
-## 🪟 Windows (One-Click Version)
-
-No setup. No Python. No dependencies.
-
-### 🔽 Download
-
-👉 Download the latest Windows build from Releases:  
-https://github.com/PhsycoCommando/VoiceForge/releases
+> AI modes require Ollama. Without it, they fall back to rule-based cleanup.
 
 ---
 
-### ▶️ Run
+## 🔽 Download
 
-1. Extract the ZIP
-2. Double-click `VoiceForge.exe`
-3. Done
+### Option A: GitHub Release
 
----
+👉 Download `VoiceForge.zip` from [Releases](https://github.com/PhsycoCommando/VoiceForge/releases)
 
-### ⚡ What Just Works
-
-- 🎤 Real-time transcription
-- 🧠 Local AI formatting (Ollama)
-- 🎛️ Microphone selection (built-in)
-- ⚙️ Backend auto-launch (no manual setup)
-
----
-
-### ⚠️ Notes
-
-- First launch may take a few seconds (backend initializes)
-- Make sure your microphone is available in Windows
-- Works with virtual audio (Voicemod, Voicemeeter, etc.)
-
----
-
-### 🧠 Architecture (Windows)
-
-- Flutter Desktop UI
-- Python backend (bundled via PyInstaller)
-- WASAPI-native audio capture (no PortAudio instability)
-- Local Whisper transcription + Ollama processing
-
----
-
-💡 This version is designed for **zero-friction usage** — download → run → go.
+### Option B: Clone & Build
 
 ```bash
 git clone https://github.com/PhsycoCommando/VoiceForge.git
 cd VoiceForge
-chmod +x scripts/install.sh
-./scripts/install.sh
 ```
 
-Launch from system search:
+---
 
-```
-VoiceForge
-```
+## 🚀 Quick Start (3 Steps)
+
+### Step 1: Install Python Backend
+
+Double-click **`install_backend.bat`**
+
+- Checks for Python 3.12+
+- Creates an isolated virtual environment
+- Installs all dependencies
+
+> Don't have Python? Download from [python.org](https://www.python.org/downloads/) — check **"Add to PATH"** during install.
+
+### Step 2: Install Ollama + AI Models
+
+Double-click **`install_ollama.bat`**
+
+- Installs [Ollama](https://ollama.com/download) if needed
+- Pulls recommended models:
+
+| Model | Size | Purpose |
+|---|---|---|
+| **gemma3:4b** | 3.3 GB | Markdown formatting |
+| **mistral:7b** | 4.4 GB | Summary, Prompt, Speech modes |
+
+> Models run entirely on your machine — no cloud, no subscriptions.
+
+### Step 3: Launch
+
+Double-click **`VoiceForge.exe`** — done. 🎤
+
+---
 
 ## 🧰 Requirements
 
-* Linux (Ubuntu / Pop!_OS tested)
-* Python 3.10+
-* Ollama installed
+| Requirement | Details |
+|---|---|
+| **Windows 10/11** | 64-bit |
+| **Python 3.12+** | [Download](https://www.python.org/downloads/) |
+| **Ollama** | [Download](https://ollama.com/download) |
+| **Disk Space** | ~8 GB (models + backend) |
+| **Microphone** | Any USB or built-in mic |
 
-👉 Install Ollama:
-https://ollama.com
+---
 
 ## 🤖 Recommended Models
 
-| Use Case        | Model       |
-| --------------- | ----------- |
-| Fast / Light    | gemma3:4b   |
-| Balanced        | qwen:7b     |
-| Dev Structuring | deepseek-r1 |
+| Model | Size | Use Case |
+|---|---|---|
+| **gemma3:4b** | 3.3 GB | Fast & lightweight formatting |
+| **mistral:7b** | 4.4 GB | Balanced quality for all AI modes |
+| **deepseek-r1:7b** | 4.7 GB | Alternative for dev/technical content |
 
-## 🖥 Usage
-
-Run manually:
-
+Install manually:
 ```bash
-./scripts/run.sh
+ollama pull gemma3:4b
+ollama pull mistral:7b
 ```
-
-Or launch via system app menu.
-
-## 📁 Project Structure
-
-```
-backend/     Python transcription + API
-ui/          Flutter desktop application
-scripts/     install + run automation
-assets/      icons and static resources
-```
-
-## 🧪 Status
-
-🔥 **Latest Release: [v0.1.1](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v0.1.1) — Stability Patch**
-
-* Fixed dock/launcher relaunch on Pop!_OS (COSMIC / Wayland)
-* Single-instance UI enforcement
-* Improved process lifecycle handling
-* Resolved intermittent connection issues on first launch
 
 ---
 
-## 🧪 Development Notes (Windows Build)
+## 🏗 Architecture
 
-**Build Date:** 4/16/2026  
-**Dev Time:** ~20 hours (2-day push)
+```
+VoiceForge/
+├── VoiceForge.exe              Flutter Desktop UI (Windows)
+├── backend/                    Python server (FastAPI + Whisper + Ollama)
+│   ├── server.py               WebSocket + REST API
+│   ├── transcriber.py          faster-whisper engine
+│   ├── formatter.py            Rule-based formatters (Clean, Bullet)
+│   ├── ai_formatter.py         AI-powered formatters (Markdown, Summary, etc.)
+│   └── voice_forge.json        Runtime configuration
+├── install_backend.bat         One-click Python setup
+├── install_ollama.bat          One-click Ollama + model setup
+└── INSTALL.md                  Full installation guide
+```
 
-This release represents a major milestone:
-
-- ✅ Full Windows standalone build (no Python required)
-- ✅ Backend packaged with PyInstaller
-- ✅ Audio system stabilized after extensive WASAPI / WDM debugging
-- ✅ Microphone selection system implemented (UI + backend sync)
-- ✅ Port conflict handling added for dev + production coexistence
-- ✅ Cross-platform Flutter foundation expanded (Windows/Linux/macOS ready)
-
----
-
-### ⚔️ Known Battle (Audio)
-
-Audio capture on Windows required:
-
-- Eliminating PortAudio instability
-- Handling WASAPI device routing (including Voicemeeter / Voicemod)
-- Preventing WDM-KS driver crashes (`-9999 WdmSyncIoctl`)
-- Implementing persistent / singleton recording strategies
-
-This build reflects a **fully stabilized workaround architecture**.
+**How it works:**
+1. Flutter UI launches the Python backend automatically
+2. WASAPI-native audio capture feeds real-time audio chunks
+3. faster-whisper transcribes live with partial previews
+4. On stop, accumulated text is instantly finalized (no re-processing)
+5. Formatting modes transform raw text on demand
 
 ---
 
-🚀 Future improvements will focus on:
+## ⚙️ Customization
 
-- Setup installer (MSI / EXE installer)
-- Model preloading & offline optimization
-- UI/UX polish
-- Multi-device / system audio capture expansion
+Edit `backend/voice_forge.json` to change AI model routing:
+
+```json
+{
+    "ollama_models": {
+        "markdown": "gemma3:4b",
+        "summary": "mistral:7b",
+        "speech": "mistral:7b"
+    }
+}
+```
+
+See [INSTALL.md](./INSTALL.md) for full configuration options.
+
+---
 
 ## 💰 Support
 
-If you find this useful and want to support development:
+Free to use. If you find it useful:
 
-☕ [https://ko-fi.com/phsyco](https://ko-fi.com/phsyco)
+☕ [ko-fi.com/phsyco](https://ko-fi.com/phsyco) — Pay what you want
 
-More support options coming soon.
+---
 
 ## 📜 License
 
-This project is licensed under the MIT License.  
+This project is licensed under the MIT License.
 See the [LICENSE](./LICENSE) file for details.
