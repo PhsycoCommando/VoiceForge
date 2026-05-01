@@ -90,6 +90,12 @@ class ApiService {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Open the sessions folder in the OS file explorer (desktop only).
+  Future<Map<String, dynamic>> openSessionsFolder() async {
+    final resp = await _client.get(Uri.parse('$baseUrl/sessions/open-folder'));
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   /// Transcribe a local audio file via the backend /transcribe endpoint.
   /// Supported formats: WAV, MP3, MP4, M4A, OGG, FLAC, WEBM, OPUS
   /// Returns {'raw': '...', 'clean': '...', 'mode': '...'}.

@@ -586,6 +586,24 @@ class _HomeScreenState extends State<HomeScreen> {
           label: const Text('Clear'),
           style: TextButton.styleFrom(foregroundColor: Colors.white54),
         ),
+        const SizedBox(width: 4),
+        Tooltip(
+          message: 'Open sessions folder',
+          child: IconButton(
+            onPressed: () async {
+              try {
+                await _api.openSessionsFolder();
+              } catch (_) {}
+            },
+            icon: const Icon(Icons.folder_open_rounded, size: 18),
+            style: IconButton.styleFrom(
+              foregroundColor: Colors.white54,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.all(6),
+              minimumSize: const Size(32, 32),
+            ),
+          ),
+        ),
       ],
     );
   }
