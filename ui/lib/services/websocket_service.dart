@@ -88,7 +88,7 @@ class WebSocketService {
   static const _watchdogInterval = Duration(seconds: 30);
   static const _deadSocketThreshold = Duration(seconds: 40);
 
-  WebSocketService({this.wsUrl = 'ws://localhost:8000/stream'});
+  WebSocketService({this.wsUrl = 'ws://localhost:8765/stream'});
 
   // ---------------------------------------------------------------------------
   // Connect / Disconnect

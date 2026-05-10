@@ -2,12 +2,13 @@ import 'dart:io';
 
 /// Singleton service managing the Python backend lifecycle (desktop only).
 ///
-/// On startup, [launch] is called from main.dart to start the backend.
-/// If the backend crashes or freezes, the UI can call [restart] to kill
-/// the old process and spin up a fresh one.
+/// Cross-platform: handles Windows (.exe venv) and Linux (.venv) layouts.
+/// Port: 8765 (VoiceForge Linux standard)
 class BackendService {
   BackendService._();
   static final instance = BackendService._();
+
+  static const int backendPort = 8765;
 
   /// Tracked backend process — null if we didn't spawn it.
   Process? _process;
@@ -20,27 +21,30 @@ class BackendService {
     _process = null;
   }
 
-  /// Launch the Python backend if not already running on port 8000.
+  /// Launch the Python backend if not already running.
   ///
-  /// Checks port 8000 first — if the backend is reachable, skips launch.
-  /// Otherwise, launches `backend/venv/Scripts/pythonw.exe server.py`
-  /// (falls back to python.exe if pythonw.exe is missing).
+  /// Checks port 8765 first — if the backend is reachable, skips launch.
+  /// On Windows: uses venv/Scripts/pythonw.exe
+  /// On Linux:   uses .venv/bin/python3 + uvicorn
   Future<void> launch() async {
-    final log = File('${Directory.systemTemp.path}\\vf_backend_debug.txt');
+    final logPath = Platform.isWindows
+        ? '${Directory.systemTemp.path}\\vf_backend_debug.txt'
+        : '/tmp/vf_backend_debug.txt';
+    final log = File(logPath);
     void dbg(String msg) {
       log.writeAsStringSync('[${DateTime.now()}] $msg\n', mode: FileMode.append);
     }
 
     dbg('=== BackendService.launch START ===');
+    dbg('Platform: ${Platform.operatingSystem}');
     dbg('Platform.resolvedExecutable: ${Platform.resolvedExecutable}');
-    dbg('Directory.current: ${Directory.current.path}');
 
-    // Check if backend is already running on port 8000.
+    // Check if backend is already running.
     try {
       final statusCode = await Future(() async {
         final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
         try {
-          final request = await client.getUrl(Uri.parse('http://localhost:8000/'));
+          final request = await client.getUrl(Uri.parse('http://localhost:$backendPort/'));
           final response = await request.close();
           await response.drain<void>();
           client.close();
@@ -54,19 +58,22 @@ class BackendService {
         dbg('Backend already running — reusing.');
         return;
       }
-      dbg('Backend responded with status $statusCode — will try to respawn.');
+      dbg('Backend responded with status $statusCode — will respawn.');
     } catch (e) {
       dbg('Backend not running: $e');
     }
 
-    // Kill any orphaned pythonw.exe that may be holding port 8000.
+    // Kill orphaned processes
     if (Platform.isWindows) {
-      dbg('Killing orphaned pythonw.exe processes...');
       try {
         await Process.run('taskkill', ['/F', '/IM', 'pythonw.exe']);
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 500));
+    } else {
+      try {
+        await Process.run('pkill', ['-f', 'uvicorn server:app']);
+      } catch (_) {}
     }
+    await Future.delayed(const Duration(milliseconds: 500));
 
     await _spawnProcess(dbg);
   }
@@ -74,14 +81,11 @@ class BackendService {
   /// Kill current + orphaned backend processes, then relaunch.
   Future<void> restart() async {
     kill();
-
-    // Kill orphaned pythonw.exe processes that may hold port 8000.
     if (Platform.isWindows) {
-      try {
-        await Process.run('taskkill', ['/F', '/IM', 'pythonw.exe']);
-      } catch (_) {}
+      try { await Process.run('taskkill', ['/F', '/IM', 'pythonw.exe']); } catch (_) {}
+    } else {
+      try { await Process.run('pkill', ['-f', 'uvicorn server:app']); } catch (_) {}
     }
-
     await Future.delayed(const Duration(milliseconds: 500));
     await launch();
   }
@@ -91,12 +95,15 @@ class BackendService {
   Future<void> _spawnProcess(void Function(String) dbg) async {
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     final sep = Platform.pathSeparator;
+
+    // Search paths for the backend directory
     final possiblePaths = [
       '$exeDir${sep}backend',
-      '$exeDir$sep..$sep${sep}backend',
+      '$exeDir$sep..${sep}backend',
       '${Directory.current.path}${sep}backend',
-      // flutter run from ui/ — backend is at ../backend (repo root)
       '${Directory.current.path}$sep..${sep}backend',
+      // Linux: ~/VoiceForge/backend
+      '${Platform.environment['HOME'] ?? ''}${sep}VoiceForge${sep}backend',
     ];
 
     dbg('exeDir: $exeDir');
@@ -119,25 +126,43 @@ class BackendService {
 
     dbg('Using backendDir: $backendDir');
 
-    // Prefer pythonw.exe (no console window), fall back to python.exe
-    final pythonwPath = '$backendDir${sep}venv${sep}Scripts${sep}pythonw.exe';
-    final pythonPath  = '$backendDir${sep}venv${sep}Scripts${sep}python.exe';
-    final pythonw = File(pythonwPath);
-    final python  = File(pythonPath);
+    String? interpreter;
+    List<String> args;
 
-    dbg('pythonw exists: ${await pythonw.exists()} at $pythonwPath');
-    dbg('python  exists: ${await python.exists()}  at $pythonPath');
-
-    final interpreter = await pythonw.exists()
-        ? pythonw.path
-        : (await python.exists() ? python.path : null);
+    if (Platform.isWindows) {
+      // Windows: venv/Scripts/pythonw.exe server.py
+      final pythonwPath = '$backendDir${sep}venv${sep}Scripts${sep}pythonw.exe';
+      final pythonPath  = '$backendDir${sep}venv${sep}Scripts${sep}python.exe';
+      final pythonw = File(pythonwPath);
+      final python  = File(pythonPath);
+      dbg('pythonw: ${await pythonw.exists()} | python: ${await python.exists()}');
+      interpreter = await pythonw.exists()
+          ? pythonw.path
+          : (await python.exists() ? python.path : null);
+      args = ['server.py'];
+    } else {
+      // Linux/macOS: .venv/bin/uvicorn server:app
+      final uvicornPath  = '$backendDir${sep}.venv${sep}bin${sep}uvicorn';
+      final uvicorn = File(uvicornPath);
+      dbg('uvicorn: ${await uvicorn.exists()} at $uvicornPath');
+      if (await uvicorn.exists()) {
+        interpreter = uvicorn.path;
+        args = ['server:app', '--host', '127.0.0.1', '--port', '$backendPort', '--log-level', 'warning'];
+      } else {
+        // Fallback: python3 from venv
+        final python3 = '$backendDir${sep}.venv${sep}bin${sep}python3';
+        dbg('python3: ${File(python3).existsSync()} at $python3');
+        interpreter = File(python3).existsSync() ? python3 : null;
+        args = ['-m', 'uvicorn', 'server:app', '--host', '127.0.0.1', '--port', '$backendPort'];
+      }
+    }
 
     if (interpreter == null) {
-      dbg('FATAL: No Python interpreter found.');
+      dbg('FATAL: No Python interpreter found in $backendDir');
       return;
     }
 
-    dbg('Interpreter: $interpreter');
+    dbg('Interpreter: $interpreter args: $args');
 
     final env = Map<String, String>.from(Platform.environment);
     env['PYTHONIOENCODING'] = 'utf-8';
@@ -145,27 +170,25 @@ class BackendService {
     try {
       _process = await Process.start(
         interpreter,
-        ['server.py'],
+        args,
         mode: ProcessStartMode.detachedWithStdio,
         workingDirectory: backendDir,
         environment: env,
       );
       dbg('Backend spawned — PID: ${_process!.pid}');
 
-      // Capture backend stdout/stderr to a log file for diagnosis
-      final backendLog = File('${Directory.systemTemp.path}\\vf_backend_process.txt');
-      _process!.stdout.listen((data) {
-        backendLog.writeAsBytesSync(data, mode: FileMode.append);
-      });
-      _process!.stderr.listen((data) {
-        backendLog.writeAsBytesSync(data, mode: FileMode.append);
-      });
+      // Log backend output to /tmp for diagnosis
+      final backendLog = Platform.isWindows
+          ? File('${Directory.systemTemp.path}\\vf_backend_process.txt')
+          : File('/tmp/vf_backend_process.txt');
+      _process!.stdout.listen((data) => backendLog.writeAsBytesSync(data, mode: FileMode.append));
+      _process!.stderr.listen((data) => backendLog.writeAsBytesSync(data, mode: FileMode.append));
     } catch (e, st) {
       dbg('FATAL: Process.start threw: $e\n$st');
       return;
     }
 
-    await Future.delayed(const Duration(seconds: 1));
-    dbg('BackendService.launch DONE — WS will retry until backend ready.');
+    await Future.delayed(const Duration(seconds: 2));
+    dbg('BackendService.launch DONE');
   }
 }
