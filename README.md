@@ -1,6 +1,6 @@
 # 🚀 VoiceForge
 
-🚀 **Latest Release: [v1.3.0](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v1.3.0)**
+🚀 **Latest Release: [v1.4.0](https://github.com/PhsycoCommando/VoiceForge/releases/tag/v1.4.0)**
 
 **Local AI Voice Transcription + Formatting Engine**
 
@@ -96,7 +96,7 @@ Double-click **`VoiceForge.exe`** — done. 🎤
 
 | Requirement | Details |
 |---|---|
-| **Windows 10/11** | 64-bit |
+| **Windows 10/11 & Linux (KDE/GNOME)** | 64-bit |
 | **Python 3.12+** | [Download](https://www.python.org/downloads/) |
 | **Ollama** | [Download](https://ollama.com/download) |
 | **Disk Space** | ~8 GB (models + backend) |
