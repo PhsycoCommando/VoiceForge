@@ -327,11 +327,12 @@ def start_recording(device=None):
         print("[Audio] MOCK MODE: start_recording() skipping WASAPI init")
         return
 
-    # Initialize COM for this thread — required by WASAPI on Windows
-    try:
-        ctypes.windll.ole32.CoInitialize(None)
-    except Exception:
-        pass
+    # Initialize COM for this thread — Windows/WASAPI only, no-op on Linux
+    if hasattr(ctypes, 'windll'):
+        try:
+            ctypes.windll.ole32.CoInitialize(None)
+        except Exception:
+            pass
 
     # 💥 Always ensure fresh valid recorder session
     if _recorder is not None:
